@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(./start-sdn.sh:*)",
+      "Bash(./fix-docker-permissions.sh:*)",
+      "Bash(groups)",
+      "Bash(newgrp:*)",
+      "Bash(systemctl status:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)"
+    ],
+    "deny": []
+  }
+}

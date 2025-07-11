@@ -1,0 +1,71 @@
+services:
+  # RYU Controller 1 (Primary)
+  controller1:
+    build: ../controller
+    container_name: sdn-controller1
+    ports:
+      - "6633:6633"  # OpenFlow
+      - "8080:8080"  # REST API
+    networks:
+      - sdn-network
+    environment:
+      - CONTROLLER_ID=1
+      - CONTROLLER_TYPE=primary
+    volumes:
+      - ../../ryu-controllers:/app/controllers
+      - ../../config:/app/config
+
+  # RYU Controller 2 (Secondary)
+  controller2:
+    build: ../controller
+    container_name: sdn-controller2
+    ports:
+      - "6634:6633"  # OpenFlow
+      - "8081:8080"  # REST API
+    networks:
+      - sdn-network
+    environment:
+      - CONTROLLER_ID=2
+      - CONTROLLER_TYPE=secondary
+    volumes:
+      - ../../ryu-controllers:/app/controllers
+      - ../../config:/app/config
+
+  # Mininet Network
+  mininet:
+    build: ../mininet
+    container_name: sdn-mininet
+    privileged: true
+    networks:
+      - sdn-network
+    ports:
+      - "8082:8080"  # Monitoring
+    volumes:
+      - ../../mininet:/app/topology
+      - ../../config:/app/config
+    depends_on:
+      - controller1
+      - controller2
+
+  # CLI Interface
+  cli:
+    build: ../cli
+    container_name: sdn-cli
+    networks:
+      - sdn-network
+    volumes:
+      - ../../cli:/app/cli
+      - ../../config:/app/config
+    depends_on:
+      - controller1
+      - controller2
+      - mininet
+    stdin_open: true
+    tty: true
+
+networks:
+  sdn-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

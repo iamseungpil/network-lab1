@@ -1,0 +1,28 @@
+{
+  "controllers": {
+    "primary": {
+      "name": "controller1",
+      "host": "controller1",
+      "port": 6633,
+      "rest_port": 8080,
+      "role": "master"
+    },
+    "secondary": {
+      "name": "controller2", 
+      "host": "controller2",
+      "port": 6633,
+      "rest_port": 8080,
+      "role": "slave"
+    }
+  },
+  "network": {
+    "switches": 10,
+    "hosts_per_switch": 2,
+    "topology": "tree"
+  },
+  "flow_settings": {
+    "default_priority": 1,
+    "idle_timeout": 300,
+    "hard_timeout": 0
+  }
+}
