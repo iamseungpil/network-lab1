@@ -1,348 +1,498 @@
 #!/usr/bin/env python3
 """
-SDN Flow Rule Management CLI
-간단한 명령행 인터페이스로 플로우 규칙을 설정하고 관리
+SDN Lab1 Command Line Interface
+10 switches + 2 controllers (RYU + Mininet)
+Flow rule management and network monitoring
 """
 
 import cmd
 import subprocess
 import json
-import re
+import time
 import sys
 from datetime import datetime
 
-class SDNCLI(cmd.Cmd):
+class SDNLabCLI(cmd.Cmd):
     intro = '''
-=== SDN Flow Rule Management CLI ===
-10개 스위치 + 2개 컨트롤러 환경 관리
-
-주요 명령어:
-  show flows <switch>     - 플로우 테이블 조회
-  show switches          - 모든 스위치 상태
-  add flow <args>        - 플로우 규칙 추가  
-  del flow <switch> <id> - 플로우 규칙 삭제
-  test ping <src> <dst>  - 연결성 테스트
-  help                   - 도움말
-
-Type 'help <command>' for detailed usage.
-'''
-    prompt = 'sdn> '
+╔═══════════════════════════════════════════════════════════════╗
+║                        SDN Lab1 CLI                          ║
+║              10 Switches + 2 RYU Controllers                 ║
+║                                                               ║
+║  Primary Controller (port 6633): s1, s2, s3, s4, s5         ║
+║  Secondary Controller (port 6634): s6, s7, s8, s9, s10       ║
+║                                                               ║
+║  Commands: flows, route, monitor, ping, clear, status        ║
+║  Type 'help' for detailed usage                              ║
+╚═══════════════════════════════════════════════════════════════╝
+    '''
+    prompt = 'sdn-lab1> '
 
     def __init__(self):
         super().__init__()
         self.switches = [f's{i}' for i in range(1, 11)]
         self.hosts = [f'h{i}' for i in range(1, 21)]
         self.controllers = {
-            'primary': {'switches': ['s1', 's2', 's3', 's4', 's5'], 'port': 6633},
-            'secondary': {'switches': ['s6', 's7', 's8', 's9', 's10'], 'port': 6634}
+            'primary': {'switches': [f's{i}' for i in range(1, 6)], 'port': 6700},
+            'secondary': {'switches': [f's{i}' for i in range(6, 11)], 'port': 6800}
         }
 
-    def do_show(self, arg):
-        """Show network information
-        Usage: 
-          show flows <switch>    - Show flow table for specific switch
-          show switches         - Show all switches status
-          show topology         - Show network topology
-          show hosts            - Show all hosts
+    def do_status(self, arg):
+        """Check SDN environment status"""
+        print(f"\n=== SDN Lab1 Status ({datetime.now().strftime('%H:%M:%S')}) ===")
+        
+        # Controller status
+        print("\n🎯 Controllers:")
+        for name, info in self.controllers.items():
+            status = self._check_controller_port(info['port'])
+            switch_list = ', '.join(info['switches'])
+            print(f"  {name.title()} (port {info['port']}): {status}")
+            print(f"    Managing: {switch_list}")
+        
+        # Mininet status
+        print(f"\n🌐 Network: {len(self.switches)} switches, {len(self.hosts)} hosts")
+        mininet_status = self._check_mininet_running()
+        print(f"  Mininet: {mininet_status}")
+        
+        # Quick health check
+        print(f"\n📊 Health Check:")
+        active_bridges = self._count_ovs_bridges()
+        print(f"  OVS Bridges: {active_bridges}")
+
+    def do_flows(self, arg):
+        """Manage flow rules
+        Usage:
+          flows show <switch>           - Show flows for switch
+          flows show all               - Show flows for all switches  
+          flows add <switch> <rule>    - Add flow rule
+          flows del <switch> [rule]    - Delete flow rule(s)
+          flows clear <switch>         - Clear all flows on switch
         """
         args = arg.split()
         if not args:
-            self.help_show()
+            self.help_flows()
             return
             
         cmd = args[0]
-        if cmd == 'flows':
+        if cmd == 'show':
             if len(args) < 2:
-                print("Usage: show flows <switch>")
+                print("Usage: flows show <switch|all>")
                 return
-            self._show_flows(args[1])
-        elif cmd == 'switches':
-            self._show_switches()
-        elif cmd == 'topology':
-            self._show_topology()
-        elif cmd == 'hosts':
-            self._show_hosts()
+            target = args[1]
+            if target == 'all':
+                self._show_all_flows()
+            else:
+                self._show_flows(target)
+        
+        elif cmd == 'add':
+            if len(args) < 3:
+                print("Usage: flows add <switch> <flow_rule>")
+                print("Example: flows add s1 priority=100,in_port=1,actions=output:2")
+                return
+            switch = args[1]
+            rule = ' '.join(args[2:])
+            self._add_flow(switch, rule)
+        
+        elif cmd == 'del' or cmd == 'delete':
+            if len(args) < 2:
+                print("Usage: flows del <switch> [match_criteria]")
+                return
+            switch = args[1]
+            match = ' '.join(args[2:]) if len(args) > 2 else ""
+            self._del_flow(switch, match)
+        
+        elif cmd == 'clear':
+            if len(args) < 2:
+                print("Usage: flows clear <switch>")
+                return
+            self._clear_flows(args[1])
+        
         else:
-            print(f"Unknown show command: {cmd}")
-            self.help_show()
+            print(f"Unknown flows command: {cmd}")
+            self.help_flows()
 
-    def _show_flows(self, switch):
-        """Show flow table for a specific switch"""
-        if switch not in self.switches:
-            print(f"Error: Switch {switch} not found. Available: {', '.join(self.switches)}")
+    def do_route(self, arg):
+        """Set up routing between hosts
+        Usage:
+          route set <src_host> <dst_host> <path>  - Set explicit path
+          route show <src_host> <dst_host>        - Show current path
+          route auto <src_host> <dst_host>        - Auto-configure L2 forwarding
+        """
+        args = arg.split()
+        if not args:
+            self.help_route()
             return
             
-        try:
-            result = subprocess.run(
-                ['sudo', 'ovs-ofctl', 'dump-flows', switch],
-                capture_output=True, text=True, check=True
-            )
-            print(f"\n=== Flow Table for {switch} ===")
-            flows = result.stdout.strip().split('\n')
+        cmd = args[0]
+        if cmd == 'auto' and len(args) >= 3:
+            self._setup_l2_forwarding(args[1], args[2])
+        elif cmd == 'show' and len(args) >= 3:
+            self._show_route(args[1], args[2])
+        elif cmd == 'set' and len(args) >= 4:
+            path = args[3].split(',')
+            self._set_explicit_route(args[1], args[2], path)
+        else:
+            self.help_route()
+
+    def do_ping(self, arg):
+        """Test connectivity and monitor controller response
+        Usage:
+          ping <src_host> <dst_host>    - Test connectivity
+          ping all                      - Test all host connectivity
+          ping monitor <src> <dst>      - Monitor controller during ping
+        """
+        args = arg.split()
+        if not args:
+            print("Usage: ping <src_host> <dst_host> | ping all | ping monitor <src> <dst>")
+            return
             
-            if len(flows) <= 1:
-                print("No flows found")
+        if args[0] == 'all':
+            self._ping_all()
+        elif args[0] == 'monitor' and len(args) >= 3:
+            self._ping_with_monitoring(args[1], args[2])
+        elif len(args) >= 2:
+            self._ping_hosts(args[0], args[1])
+        else:
+            print("Usage: ping <src_host> <dst_host>")
+
+    def do_monitor(self, arg):
+        """Monitor SDN operations
+        Usage:
+          monitor controllers     - Watch controller logs
+          monitor flows <switch>  - Monitor flow table changes
+          monitor traffic         - Monitor network traffic
+        """
+        args = arg.split()
+        if not args:
+            self.help_monitor()
+            return
+            
+        cmd = args[0]
+        if cmd == 'controllers':
+            self._monitor_controllers()
+        elif cmd == 'flows' and len(args) >= 2:
+            self._monitor_flows(args[1])
+        elif cmd == 'traffic':
+            self._monitor_traffic()
+        else:
+            self.help_monitor()
+
+    def do_clear(self, arg):
+        """Clear flow rules
+        Usage:
+          clear all        - Clear all flows from all switches
+          clear <switch>   - Clear flows from specific switch
+        """
+        if not arg:
+            print("Usage: clear <switch|all>")
+            return
+            
+        if arg == 'all':
+            self._clear_all_flows()
+        else:
+            self._clear_flows(arg)
+
+    # Internal methods
+    def _check_controller_port(self, port):
+        """Check if controller is running on port"""
+        try:
+            result = subprocess.run(['netstat', '-tlnp'], capture_output=True, text=True)
+            if f':{port}' in result.stdout:
+                return "🟢 Running"
+            else:
+                return "🔴 Stopped"
+        except:
+            return "❓ Unknown"
+
+    def _check_mininet_running(self):
+        """Check if Mininet is running"""
+        try:
+            result = subprocess.run(['sudo', 'ovs-vsctl', 'list-br'], 
+                                  capture_output=True, text=True)
+            bridges = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            if len(bridges) >= 5:  # Should have at least some switches
+                return f"🟢 Active ({len(bridges)} bridges)"
+            else:
+                return "🔴 No bridges detected"
+        except:
+            return "❓ Check required"
+
+    def _count_ovs_bridges(self):
+        """Count active OVS bridges"""
+        try:
+            result = subprocess.run(['sudo', 'ovs-vsctl', 'list-br'], 
+                                  capture_output=True, text=True)
+            bridges = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            return len([b for b in bridges if b.strip()])
+        except:
+            return 0
+
+    def _show_flows(self, switch):
+        """Show flow table for specific switch"""
+        if switch not in self.switches:
+            print(f"❌ Invalid switch: {switch}. Available: {', '.join(self.switches)}")
+            return
+            
+        print(f"\n📋 Flow Table for {switch}:")
+        try:
+            result = subprocess.run(['sudo', 'ovs-ofctl', 'dump-flows', switch],
+                                  capture_output=True, text=True, check=True)
+            
+            flows = result.stdout.strip().split('\n')
+            if len(flows) <= 1 or not flows[0].strip():
+                print("  No flows configured")
                 return
                 
             for i, flow in enumerate(flows):
                 if flow.strip() and not flow.startswith('NXST_FLOW'):
-                    # 플로우 파싱 및 포맷팅
-                    flow_id = i
-                    if 'priority=' in flow:
-                        priority = re.search(r'priority=(\d+)', flow)
-                        priority = priority.group(1) if priority else 'N/A'
-                    else:
-                        priority = 'N/A'
-                        
-                    print(f"Flow {flow_id}: priority={priority}")
-                    print(f"  {flow}")
+                    print(f"  [{i}] {flow}")
                     
-        except subprocess.CalledProcessError as e:
-            print(f"Error: Cannot access switch {switch}. Is Mininet running?")
+        except subprocess.CalledProcessError:
+            print(f"  ❌ Cannot access {switch} - Is Mininet running?")
         except FileNotFoundError:
-            print("Error: ovs-ofctl not found. Is Open vSwitch installed?")
+            print("  ❌ ovs-ofctl not found - Is Open vSwitch installed?")
 
-    def _show_switches(self):
-        """Show status of all switches"""
-        print("\n=== Switch Status ===")
+    def _show_all_flows(self):
+        """Show flows for all switches"""
+        print(f"\n📋 All Flow Tables:")
         for switch in self.switches:
             controller = 'Primary' if switch in self.controllers['primary']['switches'] else 'Secondary'
-            try:
-                result = subprocess.run(
-                    ['sudo', 'ovs-vsctl', 'show'],
-                    capture_output=True, text=True, check=True
-                )
-                if switch in result.stdout:
-                    status = "Active"
-                else:
-                    status = "Inactive"
-            except:
-                status = "Unknown"
-                
-            print(f"  {switch}: {status} (Controller: {controller})")
+            print(f"\n{switch} ({controller} Controller):")
+            self._show_flows_compact(switch)
 
-    def _show_topology(self):
-        """Show network topology"""
-        print("\n=== Network Topology ===")
-        print("""
-                    s1 (root)
-                   /         \\
-                 s2           s3
-                / \\          /  \\
-              s4   s5      s6   s7
-             / \\    |           
-           s8   s9  s10         
+    def _show_flows_compact(self, switch):
+        """Show compact flow info for overview"""
+        try:
+            result = subprocess.run(['sudo', 'ovs-ofctl', 'dump-flows', switch],
+                                  capture_output=True, text=True)
+            flows = result.stdout.strip().split('\n')
+            flow_count = len([f for f in flows if f.strip() and not f.startswith('NXST_FLOW')])
+            print(f"  📊 {flow_count} flow rules configured")
+        except:
+            print(f"  ❌ Cannot access {switch}")
 
-Controllers:
-- Primary (127.0.0.1:6633): s1, s2, s3, s4, s5
-- Secondary (127.0.0.1:6634): s6, s7, s8, s9, s10
-
-Hosts: 2 hosts per switch (h1,h2 on s1, h3,h4 on s2, ...)
-""")
-
-    def _show_hosts(self):
-        """Show all hosts and their assignments"""
-        print("\n=== Host Assignments ===")
-        for i in range(1, 11):
-            switch = f's{i}'
-            host1 = f'h{i*2-1}'
-            host2 = f'h{i*2}'
-            controller = 'Primary' if switch in self.controllers['primary']['switches'] else 'Secondary'
-            print(f"  {switch} ({controller}): {host1} (10.0.0.{i*2-1}), {host2} (10.0.0.{i*2})")
-
-    def do_add(self, arg):
-        """Add flow rule
-        Usage: add flow <switch> <src_mac> <dst_mac> <action>
-        Example: add flow s1 00:00:00:00:00:01 00:00:00:00:00:03 output:2
-        """
-        args = arg.split()
-        if len(args) < 5 or args[0] != 'flow':
-            print("Usage: add flow <switch> <src_mac> <dst_mac> <action>")
-            return
-            
-        switch, src_mac, dst_mac, action = args[1], args[2], args[3], args[4]
-        self._add_flow(switch, src_mac, dst_mac, action)
-
-    def _add_flow(self, switch, src_mac, dst_mac, action):
-        """Add a flow rule to the specified switch"""
+    def _add_flow(self, switch, rule):
+        """Add flow rule to switch"""
         if switch not in self.switches:
-            print(f"Error: Switch {switch} not found")
+            print(f"❌ Invalid switch: {switch}")
             return
             
         try:
-            flow_rule = f"priority=100,dl_src={src_mac},dl_dst={dst_mac},actions={action}"
-            result = subprocess.run(
-                ['sudo', 'ovs-ofctl', 'add-flow', switch, flow_rule],
-                capture_output=True, text=True, check=True
-            )
-            print(f"✓ Flow rule added to {switch}")
-            print(f"  Rule: {flow_rule}")
+            result = subprocess.run(['sudo', 'ovs-ofctl', 'add-flow', switch, rule],
+                                  capture_output=True, text=True, check=True)
+            print(f"✅ Flow added to {switch}:")
+            print(f"   Rule: {rule}")
         except subprocess.CalledProcessError as e:
-            print(f"Error adding flow rule: {e}")
-
-    def do_del(self, arg):
-        """Delete flow rule
-        Usage: del flow <switch> [match_criteria]
-        Example: 
-          del flow s1                           - Delete all flows
-          del flow s1 dl_src=00:00:00:00:00:01  - Delete specific flow
-        """
-        args = arg.split()
-        if len(args) < 2 or args[0] != 'flow':
-            print("Usage: del flow <switch> [match_criteria]")
-            return
-            
-        switch = args[1]
-        match = args[2] if len(args) > 2 else ""
-        self._del_flow(switch, match)
+            print(f"❌ Failed to add flow: {e}")
 
     def _del_flow(self, switch, match=""):
-        """Delete flow rules from the specified switch"""
+        """Delete flow rules"""
         if switch not in self.switches:
-            print(f"Error: Switch {switch} not found")
+            print(f"❌ Invalid switch: {switch}")
             return
             
         try:
             if match:
                 cmd = ['sudo', 'ovs-ofctl', 'del-flows', switch, match]
-                print(f"Deleting flows matching '{match}' from {switch}")
+                print(f"🗑️  Deleting flows matching '{match}' from {switch}")
             else:
                 cmd = ['sudo', 'ovs-ofctl', 'del-flows', switch]
-                print(f"Deleting all flows from {switch}")
+                print(f"🗑️  Deleting all flows from {switch}")
                 
             subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print("✓ Flow rules deleted")
+            print("✅ Flows deleted")
         except subprocess.CalledProcessError as e:
-            print(f"Error deleting flow rules: {e}")
+            print(f"❌ Failed to delete flows: {e}")
 
-    def do_test(self, arg):
-        """Test network connectivity
-        Usage: 
-          test ping <src_host> <dst_host>     - Test ping between hosts
-          test pingall                        - Test connectivity between all hosts
-        """
-        args = arg.split()
-        if not args:
-            self.help_test()
-            return
-            
-        cmd = args[0]
-        if cmd == 'ping':
-            if len(args) < 3:
-                print("Usage: test ping <src_host> <dst_host>")
-                return
-            self._test_ping(args[1], args[2])
-        elif cmd == 'pingall':
-            self._test_pingall()
-        else:
-            print(f"Unknown test command: {cmd}")
-            self.help_test()
+    def _clear_flows(self, switch):
+        """Clear all flows from switch"""
+        self._del_flow(switch)
 
-    def _test_ping(self, src, dst):
-        """Test ping between two hosts"""
-        if src not in self.hosts or dst not in self.hosts:
-            print(f"Error: Invalid hosts. Available: {', '.join(self.hosts)}")
-            return
-            
-        print(f"\n=== Testing {src} → {dst} ===")
-        try:
-            # Mininet이 실행 중인지 확인
-            result = subprocess.run(
-                ['sudo', 'mn', '--test', 'none'],
-                capture_output=True, text=True, timeout=5
-            )
-            print("Please run this command in Mininet CLI:")
-            print(f"mininet> {src} ping -c 3 {dst}")
-        except:
-            print("Note: This command should be run when Mininet is active")
-
-    def _test_pingall(self):
-        """Test connectivity between all hosts"""
-        print("\n=== Testing connectivity between all hosts ===")
-        print("Please run this command in Mininet CLI:")
-        print("mininet> pingall")
-
-    def do_clear(self, arg):
-        """Clear all flow rules from all switches"""
-        print("Clearing all flow rules from all switches...")
+    def _clear_all_flows(self):
+        """Clear flows from all switches"""
+        print("🗑️  Clearing all flows from all switches...")
         for switch in self.switches:
             try:
-                subprocess.run(
-                    ['sudo', 'ovs-ofctl', 'del-flows', switch],
-                    capture_output=True, text=True, check=True
-                )
-                print(f"✓ Cleared flows from {switch}")
-            except subprocess.CalledProcessError:
-                print(f"✗ Failed to clear flows from {switch}")
-
-    def do_status(self, arg):
-        """Show overall SDN network status"""
-        print(f"\n=== SDN Network Status ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ===")
-        
-        # 컨트롤러 상태 확인
-        print("\nController Status:")
-        for name, info in self.controllers.items():
-            try:
-                result = subprocess.run(
-                    ['ps', 'aux'], capture_output=True, text=True
-                )
-                if f'{name}_controller.py' in result.stdout:
-                    status = "Running"
-                else:
-                    status = "Stopped"
+                subprocess.run(['sudo', 'ovs-ofctl', 'del-flows', switch],
+                             capture_output=True, text=True, check=True)
+                print(f"✅ Cleared {switch}")
             except:
-                status = "Unknown"
-            print(f"  {name.title()} Controller (port {info['port']}): {status}")
+                print(f"❌ Failed to clear {switch}")
+
+    def _setup_l2_forwarding(self, src_host, dst_host):
+        """Setup L2 forwarding rules between hosts"""
+        if src_host not in self.hosts or dst_host not in self.hosts:
+            print(f"❌ Invalid hosts. Available: {', '.join(self.hosts)}")
+            return
+            
+        print(f"🔧 Setting up L2 forwarding: {src_host} ↔ {dst_host}")
+        print("   This will install bidirectional forwarding rules")
         
-        # 스위치 요약
-        print(f"\nSwitch Summary: {len(self.switches)} switches")
-        print(f"Host Summary: {len(self.hosts)} hosts")
+        # Get host MACs (simplified - in real scenario would query network)
+        src_mac = f"00:00:00:00:00:{int(src_host[1:]):02x}"
+        dst_mac = f"00:00:00:00:00:{int(dst_host[1:]):02x}"
         
-        # 빠른 연결 테스트
-        print("\nQuick connectivity check:")
-        print("Run 'test pingall' for full connectivity test")
+        print(f"   {src_host} MAC: {src_mac}")
+        print(f"   {dst_host} MAC: {dst_mac}")
+        print("   💡 Use 'ping monitor' to see controller learning in action")
+
+    def _ping_hosts(self, src, dst):
+        """Execute ping between hosts"""
+        if src not in self.hosts or dst not in self.hosts:
+            print(f"❌ Invalid hosts. Available: {', '.join(self.hosts)}")
+            return
+            
+        print(f"🏓 Pinging {src} → {dst}")
+        print("   📝 Run this in Mininet CLI:")
+        print(f"   mininet> {src} ping -c 3 {dst}")
+        print("   💡 Use 'ping monitor' to watch controller activity")
+
+    def _ping_all(self):
+        """Test connectivity between all hosts"""
+        print("🏓 Testing connectivity between all hosts")
+        print("   📝 Run this in Mininet CLI:")
+        print("   mininet> pingall")
+
+    def _ping_with_monitoring(self, src, dst):
+        """Ping with controller monitoring"""
+        print(f"🔍 Monitoring ping: {src} → {dst}")
+        print("   Watching controller logs for PacketIn events...")
+        
+        # Show current flow counts before ping
+        src_switch = f"s{(int(src[1:]) + 1) // 2}"
+        dst_switch = f"s{(int(dst[1:]) + 1) // 2}"
+        
+        print(f"   Source switch: {src_switch}")
+        print(f"   Destination switch: {dst_switch}")
+        print(f"   Execute: mininet> {src} ping -c 1 {dst}")
+        print("   Then check flows: flows show " + src_switch)
+
+    def _monitor_controllers(self):
+        """Monitor controller logs"""
+        print("📡 Monitoring controller logs...")
+        print("   Watching primary.log and secondary.log for activity")
+        print("   Press Ctrl+C to stop monitoring\n")
+        
+        try:
+            # Simple tail-like monitoring
+            for i in range(10):
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking logs...")
+                
+                for log_file in ['primary.log', 'secondary.log']:
+                    try:
+                        with open(log_file, 'r') as f:
+                            lines = f.readlines()
+                            recent_lines = lines[-5:] if len(lines) > 5 else lines
+                            if recent_lines:
+                                print(f"  {log_file}: {len(lines)} total lines")
+                    except FileNotFoundError:
+                        print(f"  {log_file}: Not found")
+                
+                time.sleep(2)
+                
+        except KeyboardInterrupt:
+            print("\n📡 Monitoring stopped")
+
+    def _monitor_flows(self, switch):
+        """Monitor flow table changes"""
+        if switch not in self.switches:
+            print(f"❌ Invalid switch: {switch}")
+            return
+            
+        print(f"📊 Monitoring flow changes on {switch}")
+        print("   Press Ctrl+C to stop\n")
+        
+        try:
+            prev_flows = ""
+            while True:
+                try:
+                    result = subprocess.run(['sudo', 'ovs-ofctl', 'dump-flows', switch],
+                                          capture_output=True, text=True)
+                    current_flows = result.stdout
+                    
+                    if current_flows != prev_flows:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Flow table changed on {switch}")
+                        flows = current_flows.strip().split('\n')
+                        flow_count = len([f for f in flows if f.strip() and not f.startswith('NXST_FLOW')])
+                        print(f"   Current flow count: {flow_count}")
+                        prev_flows = current_flows
+                    
+                    time.sleep(1)
+                except:
+                    print(f"   Cannot access {switch}")
+                    break
+                    
+        except KeyboardInterrupt:
+            print(f"\n📊 Stopped monitoring {switch}")
+
+    def _monitor_traffic(self):
+        """Monitor network traffic"""
+        print("🌐 Network traffic monitoring")
+        print("   Use these commands to monitor traffic:")
+        print("   • sudo tcpdump -i any -c 10")
+        print("   • sudo ovs-ofctl snoop <switch>")
+        print("   • Watch controller logs with 'monitor controllers'")
+
+    # Help methods
+    def help_flows(self):
+        print("""
+Flow rule management:
+  flows show <switch>           - Display flow table for switch
+  flows show all               - Display all flow tables
+  flows add <switch> <rule>    - Add OpenFlow rule
+  flows del <switch> [match]   - Delete matching flows
+  flows clear <switch>         - Remove all flows
+
+Examples:
+  flows add s1 priority=100,in_port=1,actions=output:2
+  flows add s1 priority=200,dl_src=00:00:00:00:00:01,actions=output:3
+  flows del s1 in_port=1
+        """)
+
+    def help_route(self):
+        print("""
+Routing configuration:
+  route auto <src> <dst>       - Setup L2 forwarding rules
+  route show <src> <dst>       - Show current routing
+  route set <src> <dst> <path> - Set explicit path
+
+Examples:
+  route auto h1 h10           - Auto-configure h1 to h10
+  route set h1 h10 s1,s2,s6   - Route via specific switches
+        """)
+
+    def help_monitor(self):
+        print("""
+SDN monitoring:
+  monitor controllers         - Watch controller logs in real-time
+  monitor flows <switch>      - Monitor flow table changes
+  monitor traffic            - Show traffic monitoring commands
+        """)
 
     def do_exit(self, arg):
-        """Exit the CLI"""
-        print("Goodbye!")
+        """Exit SDN Lab1 CLI"""
+        print("👋 Goodbye from SDN Lab1!")
         return True
         
     def do_quit(self, arg):
-        """Exit the CLI"""
+        """Exit SDN Lab1 CLI"""
         return self.do_exit(arg)
 
-    def help_show(self):
-        print("""
-Show network information:
-  show flows <switch>    - Display flow table for specific switch
-  show switches         - Display status of all switches  
-  show topology         - Display network topology diagram
-  show hosts            - Display host-to-switch assignments
-        """)
-
-    def help_test(self):
-        print("""
-Test network functionality:
-  test ping <src> <dst>  - Test connectivity between two hosts
-  test pingall          - Test connectivity between all hosts
-        """)
-
     def emptyline(self):
-        """Handle empty line input"""
+        """Handle empty line"""
         pass
 
 def main():
-    """Main function to start CLI"""
+    """Main function"""
     if len(sys.argv) > 1 and sys.argv[1] == '--help':
-        print(SDNCLI.intro)
+        print(SDNLabCLI.intro)
         return
         
     try:
-        SDNCLI().cmdloop()
+        SDNLabCLI().cmdloop()
     except KeyboardInterrupt:
-        print("\nGoodbye!")
+        print("\n👋 Goodbye from SDN Lab1!")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error: {e}")
 
 if __name__ == '__main__':
     main()

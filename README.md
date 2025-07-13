@@ -269,3 +269,177 @@ sudo systemctl status openvswitch-switch
 - OVS: `sudo ovs-appctl vlog/list`
 
 이 프로젝트를 통해 SDN의 핵심 개념인 **제어 평면과 데이터 평면의 분리**, **중앙집중식 네트워크 제어**, **프로그래머블 네트워킹**을 직관적으로 이해할 수 있습니다.
+
+## CLI 테스트 가이드
+
+### 단계별 테스트 시나리오
+
+#### **1단계: 환경 확인**
+```bash
+# SDN CLI 시작
+python3 sdn_cli.py
+
+# 전체 네트워크 상태 확인
+sdn> status
+sdn> show topology
+sdn> show switches
+sdn> show hosts
+```
+
+#### **2단계: 초기 플로우 테이블 확인**
+```bash
+# 각 컨트롤러 도메인의 대표 스위치 확인
+sdn> show flows s1          # Primary 컨트롤러 (루트 스위치)
+sdn> show flows s6          # Secondary 컨트롤러 (경계 스위치)
+
+# 결과: table-miss 플로우만 존재해야 함
+```
+
+#### **3단계: 기본 연결성 테스트**
+```bash
+# 같은 컨트롤러 내부 통신 (Primary)
+sdn> test ping h1 h3        # s1 → s2 경로
+
+# Mininet CLI에서 실제 실행:
+mininet> h1 ping -c 1 h3
+
+# 플로우 테이블 변화 확인
+sdn> show flows s1          # 새로운 플로우 규칙 생성 확인
+sdn> show flows s2
+```
+
+#### **4단계: 컨트롤러 간 통신 테스트**
+```bash
+# Primary → Secondary 도메인 통신
+sdn> test ping h1 h11       # s1 → s3 → s6 경로
+
+# Mininet CLI에서 실제 실행:
+mininet> h1 ping -c 1 h11
+
+# 경로상 모든 스위치 플로우 확인
+sdn> show flows s1          # Primary 시작점
+sdn> show flows s3          # 경계 스위치 (Primary)
+sdn> show flows s6          # 경계 스위치 (Secondary)
+```
+
+#### **5단계: 수동 플로우 규칙 추가**
+```bash
+# 기존 플로우 삭제
+sdn> del flow s1
+
+# 수동으로 플로우 규칙 추가
+sdn> add flow s1 00:00:00:00:00:01 00:00:00:00:00:03 output:2
+
+# 추가된 규칙 확인
+sdn> show flows s1
+
+# 테스트: 이제 h1→h3 통신이 컨트롤러 개입 없이 진행
+mininet> h1 ping -c 1 h3
+```
+
+#### **6단계: 전체 연결성 테스트**
+```bash
+# 모든 호스트 간 연결성 확인
+sdn> test pingall
+
+# Mininet CLI에서 실제 실행:
+mininet> pingall
+
+# 결과 분석: 어떤 호스트들이 통신 가능한지 확인
+```
+
+#### **7단계: 고급 테스트 - 브로드캐스트**
+```bash
+# 브로드캐스트 테스트 (ARP 등)
+mininet> h1 arping -c 1 10.0.0.3
+
+# 모든 스위치의 플로우 테이블 확인
+sdn> show flows s1
+sdn> show flows s2
+sdn> show flows s3
+```
+
+### 예상 결과 및 분석
+
+#### **정상 동작 시 기대값**
+```bash
+# 1. 초기 상태
+sdn> show flows s1
+# 출력: table-miss flow (priority=0) 만 존재
+
+# 2. 첫 번째 ping 후
+sdn> show flows s1
+# 출력: 
+# - table-miss flow (priority=0)
+# - 새로운 플로우 규칙 (priority=1 또는 100)
+#   예: dl_src=00:00:00:00:00:01,dl_dst=00:00:00:00:00:03,actions=output:2
+
+# 3. 컨트롤러 상태
+sdn> status
+# 출력: Primary Controller: Running, Secondary Controller: Running
+```
+
+#### **문제 진단 방법**
+```bash
+# 1. 컨트롤러가 실행되지 않는 경우
+sdn> status
+# Primary Controller: Stopped 라고 나오면 start_sdn.sh 재실행
+
+# 2. 플로우가 설치되지 않는 경우
+sdn> show flows s1
+# table-miss flow만 계속 있다면 컨트롤러 로그 확인 필요
+
+# 3. ping이 실패하는 경우
+mininet> pingall
+# 0% dropped가 아니라면 네트워크 설정 문제
+```
+
+### 테스트 체크리스트
+
+#### **✅ 기본 기능 확인**
+- [ ] CLI가 정상적으로 시작됨
+- [ ] `show topology` 명령어로 네트워크 구조 확인
+- [ ] `show switches` 명령어로 10개 스위치 확인  
+- [ ] `show hosts` 명령어로 20개 호스트 확인
+- [ ] `status` 명령어로 컨트롤러 상태 확인
+
+#### **✅ L2 학습 스위치 동작**
+- [ ] 초기에는 table-miss 플로우만 존재
+- [ ] 첫 번째 ping 후 새로운 플로우 규칙 생성
+- [ ] 양방향 플로우 규칙 설치 (src→dst, dst→src)
+- [ ] 두 번째 ping은 하드웨어에서 직접 처리
+
+#### **✅ 컨트롤러 간 통신**
+- [ ] 같은 도메인 내부 통신 (h1↔h3) 성공
+- [ ] 도메인 간 통신 (h1↔h11) 성공
+- [ ] 경계 스위치(s3)에서 적절한 플로우 생성
+- [ ] Primary와 Secondary 모두에서 플로우 학습
+
+#### **✅ CLI 플로우 관리**
+- [ ] `add flow` 명령어로 수동 플로우 추가 가능
+- [ ] `del flow` 명령어로 플로우 삭제 가능
+- [ ] `clear` 명령어로 전체 플로우 초기화 가능
+- [ ] 수동 추가된 플로우로 정상 통신 가능
+
+### 고급 실험 아이디어
+
+#### **성능 테스트**
+```bash
+# 대량 트래픽 테스트
+mininet> iperf h1 h11
+
+# 동시 다발적 통신
+mininet> h1 ping h3 &
+mininet> h5 ping h15 &
+mininet> h11 ping h2 &
+```
+
+#### **장애 시뮬레이션**
+```bash
+# 특정 스위치 플로우 삭제 후 재학습 관찰
+sdn> del flow s3
+mininet> h1 ping h11        # 재학습 과정 관찰
+sdn> show flows s3          # 플로우 재생성 확인
+```
+
+이제 CLI를 체계적으로 테스트할 수 있는 완전한 가이드가 README에 추가되었습니다! 🎯

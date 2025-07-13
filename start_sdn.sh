@@ -5,8 +5,7 @@ echo
 
 # Conda 환경 활성화
 echo "Activating conda environment 'sdn-lab'..."
-eval "$(conda shell.bash hook)"
-conda activate sdn-lab
+source /home/starmooc/miniconda3/bin/activate sdn-lab
 
 # 환경 확인
 if [[ "$CONDA_DEFAULT_ENV" != "sdn-lab" ]]; then
@@ -44,15 +43,15 @@ cd "$(dirname "$0")"
 
 echo "Starting controllers..."
 
-# Primary Controller 시작 (포트 6633)
-echo "Starting Primary Controller (s1-s5) on port 6633..."
-ryu-manager ryu-controller/primary_controller.py --ofp-tcp-listen-port 6633 --verbose &
+# Primary Controller 시작 (포트 6700)
+echo "Starting Primary Controller (s1-s5) on port 6700..."
+ryu-manager ryu-controller/primary_controller.py --ofp-tcp-listen-port 6700 --verbose &
 PRIMARY_PID=$!
 sleep 2
 
-# Secondary Controller 시작 (포트 6634)
-echo "Starting Secondary Controller (s6-s10) on port 6634..."
-ryu-manager ryu-controller/secondary_controller.py --ofp-tcp-listen-port 6634 --verbose &
+# Secondary Controller 시작 (포트 6800)
+echo "Starting Secondary Controller (s6-s10) on port 6800..."
+ryu-manager ryu-controller/secondary_controller.py --ofp-tcp-listen-port 6800 --verbose &
 SECONDARY_PID=$!
 sleep 2
 

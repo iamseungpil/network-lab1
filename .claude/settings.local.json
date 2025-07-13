@@ -35,7 +35,24 @@
       "Bash(sudo mn:*)",
       "Bash(/dev/null)",
       "Bash(pkill:*)",
-      "Bash(./test_conda_sdn.sh:*)"
+      "Bash(./test_conda_sdn.sh:*)",
+      "Bash(sudo netstat:*)",
+      "Bash(sudo ovs-vsctl show:*)",
+      "Bash(./stop_sdn.sh:*)",
+      "Bash(./start_sdn.sh:*)",
+      "Bash(python3:*)",
+      "Bash(sudo ovs-vsctl list-br:*)",
+      "Bash(conda info:*)",
+      "Bash(python:*)",
+      "Bash(/home/starmooc/miniconda3/bin/conda env list)",
+      "Bash(/home/starmooc/miniconda3/envs/sdn-lab/bin/python --version)",
+      "Bash(/home/starmooc/miniconda3/envs/sdn-lab/bin/ryu-manager --version)",
+      "Bash(grep:*)",
+      "Bash(sudo python3:*)",
+      "Bash(tmux list-sessions:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(tmux send-keys:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

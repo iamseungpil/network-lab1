@@ -23,7 +23,7 @@ class SDNTopology(Topo):
         switches = []
         for i in range(1, 11):
             switch = self.addSwitch(f's{i}', 
-                                  dpid=f'000000000000000{i:x}',
+                                  dpid=f'{i:016x}',
                                   protocols='OpenFlow13')
             switches.append(switch)
             info(f'Added switch s{i}\n')
@@ -63,11 +63,11 @@ def run_topology():
     
     # 컨트롤러 설정
     info('*** Setting up controllers\n')
-    c1 = RemoteController('c1', ip='127.0.0.1', port=6633)  # Primary
-    c2 = RemoteController('c2', ip='127.0.0.1', port=6634)  # Secondary
+    c1 = RemoteController('c1', ip='127.0.0.1', port=6700)  # Primary
+    c2 = RemoteController('c2', ip='127.0.0.1', port=6800)  # Secondary
     
-    info('Primary Controller: 127.0.0.1:6633 (s1-s5)\n')
-    info('Secondary Controller: 127.0.0.1:6634 (s6-s10)\n')
+    info('Primary Controller: 127.0.0.1:6700 (s1-s5)\n')
+    info('Secondary Controller: 127.0.0.1:6800 (s6-s10)\n')
     
     # 토폴로지 생성
     topo = SDNTopology()
@@ -78,7 +78,7 @@ def run_topology():
         switch=OVSSwitch,
         link=TCLink,
         controller=None,  # 수동으로 컨트롤러 할당
-        autoSetMacs=False,  # 수동으로 MAC 설정
+        autoSetMacs=False,  # 자동 MAC 설정 비활성화 (컨트롤러가 학습하도록)
         autoStaticArp=False,
         build=False
     )
@@ -90,23 +90,48 @@ def run_topology():
     # 네트워크 빌드
     net.build()
     
-    info('*** Assigning switches to controllers\n')
-    
-    # Primary Controller: s1-s5
-    for i in range(1, 6):
-        switch = net.get(f's{i}')
-        switch.start([c1])
-        info(f's{i} -> Primary Controller (127.0.0.1:6633)\n')
-    
-    # Secondary Controller: s6-s10
-    for i in range(6, 11):
-        switch = net.get(f's{i}')
-        switch.start([c2])
-        info(f's{i} -> Secondary Controller (127.0.0.1:6634)\n')
-    
     try:
         info('*** Starting network\n')
         net.start()
+        
+        info('*** Assigning switches to controllers\n')
+        
+        # Primary Controller: s1-s5
+        primary_switches = []
+        for i in range(1, 6):
+            switch = net.get(f's{i}')
+            primary_switches.append(switch)
+            info(f's{i} will connect to Primary Controller (127.0.0.1:6700)\n')
+        
+        # Secondary Controller: s6-s10  
+        secondary_switches = []
+        for i in range(6, 11):
+            switch = net.get(f's{i}')
+            secondary_switches.append(switch)
+            info(f's{i} will connect to Secondary Controller (127.0.0.1:6800)\n')
+        
+        # 스위치들을 각각의 컨트롤러에 연결
+        for switch in primary_switches:
+            switch.start([c1])
+            info(f'Starting {switch.name} with Primary Controller\n')
+            time.sleep(0.5)
+            
+        for switch in secondary_switches:
+            switch.start([c2])
+            info(f'Starting {switch.name} with Secondary Controller\n') 
+            time.sleep(0.5)
+        
+        # 컨트롤러 연결 대기
+        info('*** Waiting for controller connections...\n')
+        time.sleep(5)  # 더 긴 대기 시간
+        
+        # 스위치 연결 상태 확인
+        info('*** Verifying switch connections...\n')
+        for switch in net.switches:
+            if switch.connected():
+                info(f'{switch.name}: Connected\n')
+            else:
+                info(f'{switch.name}: Not connected - Check controller!\n')
         
         # 네트워크 정보 출력
         info('*** Network Summary\n')
@@ -119,10 +144,6 @@ def run_topology():
             info(f'Switch {switch.name}: DPID {switch.dpid}\n')
         
         info('\n*** Testing basic connectivity\n')
-        
-        # 컨트롤러 연결 확인을 위한 대기
-        info('Waiting for controller connections...\n')
-        time.sleep(3)
         
         # 기본 연결성 테스트
         info('*** Testing ping between hosts\n')

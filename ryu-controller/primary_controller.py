@@ -24,6 +24,16 @@ class PrimaryController(app_manager.RyuApp):
         # L2 학습 테이블: {dpid: {mac: port}}
         self.mac_to_port = {}
         self.datapaths = {}
+        self.global_mac_table = {}  # {mac: (dpid, port)} - 전역 MAC 테이블
+        
+        # 스위치 간 연결 정보 (토폴로지 맵)
+        self.switch_links = {
+            1: {2: 3, 3: 4},          # s1: s2(port3), s3(port4)
+            2: {1: 3, 4: 4, 5: 5},    # s2: s1(port3), s4(port4), s5(port5)
+            3: {1: 4, 6: 4, 7: 5},    # s3: s1(port4), s6(port4), s7(port5)
+            4: {2: 4, 8: 4, 9: 5},    # s4: s2(port4), s8(port4), s9(port5)
+            5: {2: 5, 10: 4}          # s5: s2(port5), s10(port4)
+        }
         
         self.logger.info("Primary Controller initialized - managing switches s1-s5")
 
@@ -96,17 +106,29 @@ class PrimaryController(app_manager.RyuApp):
 
         self.logger.info(f"Primary: Packet from {src} to {dst} on switch s{dpid} port {in_port}")
 
-        # MAC 주소 학습
-        self.mac_to_port[dpid][src] = in_port
-        self.logger.info(f"Primary: Learned {src} is at s{dpid} port {in_port}")
+        # MAC 주소 학습 (이미 학습된 포트와 다른 경우만 업데이트)
+        if src not in self.mac_to_port[dpid]:
+            self.mac_to_port[dpid][src] = in_port
+            self.global_mac_table[src] = (dpid, in_port)  # 전역 테이블 업데이트
+            self.logger.info(f"Primary: Learned {src} is at s{dpid} port {in_port}")
+        elif self.mac_to_port[dpid][src] != in_port:
+            # MAC 이동 감지
+            self.logger.info(f"Primary: MAC {src} moved from port {self.mac_to_port[dpid][src]} to port {in_port} on s{dpid}")
+            self.mac_to_port[dpid][src] = in_port
+            self.global_mac_table[src] = (dpid, in_port)
 
         # 목적지 MAC 주소에 따른 포워딩 결정
         if dst in self.mac_to_port[dpid]:
             out_port = self.mac_to_port[dpid][dst]
             self.logger.info(f"Primary: Forwarding to known location - s{dpid} port {out_port}")
         else:
-            out_port = ofproto.OFPP_FLOOD
-            self.logger.info(f"Primary: Unknown destination {dst} - flooding on s{dpid}")
+            # 개선된 크로스 컨트롤러 포워딩 로직
+            out_port = self._find_path_to_destination(dpid, dst)
+            if out_port is not None:
+                self.logger.info(f"Primary: Forwarding to remote destination via s{dpid} port {out_port}")
+            else:
+                out_port = ofproto.OFPP_FLOOD
+                self.logger.info(f"Primary: Unknown destination {dst} - flooding on s{dpid}")
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -126,6 +148,31 @@ class PrimaryController(app_manager.RyuApp):
                                 in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
         self.logger.info(f"Primary: Packet sent out on s{dpid}")
+
+    def _get_cross_controller_port(self, dpid, dst_mac):
+        """크로스 컨트롤러 포워딩을 위한 포트 결정"""
+        # h11-h20은 Secondary controller 영역 (MAC: 00:00:00:00:00:0b ~ 00:00:00:00:00:14)
+        if dst_mac >= '00:00:00:00:00:0b' and dst_mac <= '00:00:00:00:00:14':
+            # Secondary 영역으로 가는 경로 계산
+            if dpid == 3:  # s3에서 직접
+                if dst_mac <= '00:00:00:00:00:0c':  # h11, h12 -> s6
+                    return 4  # s3-eth4 -> s6
+                elif dst_mac <= '00:00:00:00:00:0e':  # h13, h14 -> s7
+                    return 5  # s3-eth5 -> s7
+            elif dpid == 1:  # s1에서 s3을 통해
+                return 4  # s1-eth4 -> s3
+            elif dpid == 2:  # s2에서 s4/s5를 통해
+                if dst_mac >= '00:00:00:00:00:0f':  # h15-h20 -> s8,s9,s10
+                    return 4  # s2-eth4 -> s4 (s8,s9로 가는 경로)
+        return None
+    
+    def _find_path_to_destination(self, current_dpid, dst_mac):
+        """목적지까지의 최적 경로 찾기"""
+        if dst_mac in self.global_mac_table:
+            target_dpid, target_port = self.global_mac_table[dst_mac]
+            if target_dpid in self.switch_links.get(current_dpid, {}):
+                return self.switch_links[current_dpid][target_dpid]
+        return self._get_cross_controller_port(current_dpid, dst_mac)
 
     def get_status(self):
         """컨트롤러 상태 반환"""
