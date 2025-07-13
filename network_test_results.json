@@ -1,0 +1,42 @@
+{
+  "timestamp": "2025-07-14T00:32:08.937124",
+  "results": {
+    "same_controller": {
+      "h1->h2": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h3->h4": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h11->h12": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h13->h14": {
+        "status": "FAILED",
+        "error": ""
+      }
+    },
+    "cross_controller": {
+      "h1->h12": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h5->h11": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h12->h1": {
+        "status": "FAILED",
+        "error": ""
+      },
+      "h16->h3": {
+        "status": "FAILED",
+        "error": ""
+      }
+    }
+  },
+  "success_rate": 0.0
+}
