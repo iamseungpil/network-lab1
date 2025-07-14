@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Secondary Controller - 로컬 실행용
-스위치 s6-s10 관리하는 RYU L2 학습 스위치
+Enhanced Secondary Controller with Cross-Controller Support
+크로스 컨트롤러 통신을 지원하는 개선된 Secondary Controller
 """
 
 from ryu.base import app_manager
@@ -9,14 +9,14 @@ from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet import packet, ethernet, ether_types
+from ryu.lib.packet import packet, ethernet, ether_types, arp, icmp, ipv4
 
 
-class SecondaryController(app_manager.RyuApp):
+class EnhancedSecondaryController(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
-        super(SecondaryController, self).__init__(*args, **kwargs)
+        super(EnhancedSecondaryController, self).__init__(*args, **kwargs)
         
         # 관리할 스위치 DPID (s6-s10)
         self.managed_switches = {6, 7, 8, 9, 10}
@@ -28,14 +28,28 @@ class SecondaryController(app_manager.RyuApp):
         
         # 스위치 간 연결 정보 (토폴로지 맵)
         self.switch_links = {
-            6: {3: 3},                # s6: s3(port3)
-            7: {3: 3},                # s7: s3(port3)
-            8: {4: 3},                # s8: s4(port3)
-            9: {4: 3},                # s9: s4(port3)
-            10: {5: 3}                # s10: s5(port3)
+            6: {3: 3},           # s6: s3(port3)
+            7: {3: 3},           # s7: s3(port3)
+            8: {4: 3},           # s8: s4(port3)
+            9: {4: 3},           # s9: s4(port3)
+            10: {5: 3}           # s10: s5(port3)
         }
         
-        self.logger.info("Secondary Controller initialized - managing switches s6-s10")
+        # Primary Controller 영역의 호스트 정보 (사전 정의)
+        self.primary_hosts = {
+            '00:00:00:00:00:01': {'ip': '10.0.0.1', 'switch': 1},   # h1
+            '00:00:00:00:00:02': {'ip': '10.0.0.2', 'switch': 1},   # h2
+            '00:00:00:00:00:03': {'ip': '10.0.0.3', 'switch': 2},   # h3
+            '00:00:00:00:00:04': {'ip': '10.0.0.4', 'switch': 2},   # h4
+            '00:00:00:00:00:05': {'ip': '10.0.0.5', 'switch': 3},   # h5
+            '00:00:00:00:00:06': {'ip': '10.0.0.6', 'switch': 3},   # h6
+            '00:00:00:00:00:07': {'ip': '10.0.0.7', 'switch': 4},   # h7
+            '00:00:00:00:00:08': {'ip': '10.0.0.8', 'switch': 4},   # h8
+            '00:00:00:00:00:09': {'ip': '10.0.0.9', 'switch': 5},   # h9
+            '00:00:00:00:00:0a': {'ip': '10.0.0.10', 'switch': 5}   # h10
+        }
+        
+        self.logger.info("Enhanced Secondary Controller initialized - managing switches s6-s10")
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -56,7 +70,7 @@ class SecondaryController(app_manager.RyuApp):
         
         self.logger.info(f"Secondary Controller: Switch s{dpid} connected successfully")
 
-        # Table-miss flow entry 설치 (매칭되지 않는 패킷은 컨트롤러로 전송)
+        # Table-miss flow entry 설치
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                         ofproto.OFPCML_NO_BUFFER)]
@@ -81,7 +95,7 @@ class SecondaryController(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
-        """패킷이 컨트롤러로 전송될 때 호출 (L2 학습 스위치 로직)"""
+        """패킷이 컨트롤러로 전송될 때 호출"""
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
@@ -97,38 +111,52 @@ class SecondaryController(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
-        # LLDP 패킷 무시 (링크 발견용)
+        # LLDP 패킷 무시
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
             return
 
         dst = eth.dst
         src = eth.src
 
+        # 브로드캐스트/멀티캐스트 처리
+        if dst == 'ff:ff:ff:ff:ff:ff' or dst.startswith('33:33:'):
+            self.logger.info(f"Secondary: Broadcast/Multicast from {src} on s{dpid}")
+            out_port = ofproto.OFPP_FLOOD
+            actions = [parser.OFPActionOutput(out_port)]
+            data = None
+            if msg.buffer_id == ofproto.OFP_NO_BUFFER:
+                data = msg.data
+            out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
+                                    in_port=in_port, actions=actions, data=data)
+            datapath.send_msg(out)
+            return
+
         self.logger.info(f"Secondary: Packet from {src} to {dst} on switch s{dpid} port {in_port}")
 
-        # MAC 주소 학습 (이미 학습된 포트와 다른 경우만 업데이트)
+        # MAC 주소 학습
         if src not in self.mac_to_port[dpid]:
             self.mac_to_port[dpid][src] = in_port
-            self.global_mac_table[src] = (dpid, in_port)  # 전역 테이블 업데이트
-            self.logger.info(f"Secondary: Learned {src} is at s{dpid} port {in_port}")
-        elif self.mac_to_port[dpid][src] != in_port:
-            # MAC 이동 감지
-            self.logger.info(f"Secondary: MAC {src} moved from port {self.mac_to_port[dpid][src]} to port {in_port} on s{dpid}")
-            self.mac_to_port[dpid][src] = in_port
             self.global_mac_table[src] = (dpid, in_port)
+            self.logger.info(f"Secondary: Learned {src} is at s{dpid} port {in_port}")
 
         # 목적지 MAC 주소에 따른 포워딩 결정
         if dst in self.mac_to_port[dpid]:
+            # 같은 스위치 내 로컬 전달
             out_port = self.mac_to_port[dpid][dst]
-            self.logger.info(f"Secondary: Forwarding to known location - s{dpid} port {out_port}")
+            self.logger.info(f"Secondary: Local forwarding to s{dpid} port {out_port}")
+        elif dst in self.global_mac_table:
+            # 다른 Secondary 스위치로 전달
+            target_dpid, target_port = self.global_mac_table[dst]
+            out_port = self._find_next_hop(dpid, target_dpid)
+            self.logger.info(f"Secondary: Forwarding to s{target_dpid} via port {out_port}")
+        elif dst in self.primary_hosts:
+            # Primary Controller 영역으로 전달
+            out_port = self._get_gateway_port_to_primary(dpid, dst)
+            self.logger.info(f"Secondary: Cross-controller forwarding to Primary via port {out_port}")
         else:
-            # 개선된 크로스 컨트롤러 포워딩 로직
-            out_port = self._find_path_to_destination(dpid, dst)
-            if out_port is not None:
-                self.logger.info(f"Secondary: Forwarding to remote destination via s{dpid} port {out_port}")
-            else:
-                out_port = ofproto.OFPP_FLOOD
-                self.logger.info(f"Secondary: Unknown destination {dst} - flooding on s{dpid}")
+            # 알 수 없는 목적지 - 플러딩
+            out_port = ofproto.OFPP_FLOOD
+            self.logger.info(f"Secondary: Unknown destination {dst} - flooding")
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -136,10 +164,10 @@ class SecondaryController(app_manager.RyuApp):
         if out_port != ofproto.OFPP_FLOOD:
             match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
             self.add_flow(datapath, 1, match, actions, msg.buffer_id)
-            self.logger.info(f"Secondary: Flow rule installed on s{dpid}")
+            self.logger.info(f"Secondary: Flow installed on s{dpid}: {src} -> {dst} out port {out_port}")
             return
 
-        # Packet Out (즉시 패킷 전송)
+        # Packet Out
         data = None
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
             data = msg.data
@@ -147,35 +175,32 @@ class SecondaryController(app_manager.RyuApp):
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                 in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
-        self.logger.info(f"Secondary: Packet sent out on s{dpid}")
 
-    def _get_cross_controller_port(self, dpid, dst_mac):
-        """크로스 컨트롤러 포워딩을 위한 포트 결정"""
-        # h1-h10은 Primary controller 영역 (MAC: 00:00:00:00:00:01 ~ 00:00:00:00:00:0a)
-        if dst_mac >= '00:00:00:00:00:01' and dst_mac <= '00:00:00:00:00:0a':
-            # Primary 영역으로 가는 경로 계산
-            if dpid == 6 or dpid == 7:  # s6, s7에서 s3을 통해
-                return 3  # s6-eth3 -> s3 or s7-eth3 -> s3
-            elif dpid == 8 or dpid == 9:  # s8, s9에서 s4를 통해
-                return 3  # s8-eth3 -> s4 or s9-eth3 -> s4
-            elif dpid == 10:  # s10에서 s5를 통해
-                return 3  # s10-eth3 -> s5
-        return None
-    
-    def _find_path_to_destination(self, current_dpid, dst_mac):
-        """목적지까지의 최적 경로 찾기"""
-        if dst_mac in self.global_mac_table:
-            target_dpid, target_port = self.global_mac_table[dst_mac]
-            if target_dpid in self.switch_links.get(current_dpid, {}):
-                return self.switch_links[current_dpid][target_dpid]
-        return self._get_cross_controller_port(current_dpid, dst_mac)
+    def _find_next_hop(self, current_dpid, target_dpid):
+        """목표 스위치로 가는 다음 홉 찾기"""
+        if current_dpid == target_dpid:
+            return None
+            
+        # Secondary 영역은 트리 구조가 단순함
+        # s6, s7 -> s3 -> Primary
+        # s8, s9 -> s4 -> Primary  
+        # s10 -> s5 -> Primary
+        
+        # 같은 그룹 내에서는 Primary를 통해야 함
+        return 3  # 모든 Secondary 스위치는 Primary로 가는 포트가 3번
+
+    def _get_gateway_port_to_primary(self, dpid, dst_mac):
+        """Primary 영역으로 가는 게이트웨이 포트 찾기"""
+        # 모든 Secondary 스위치는 포트 3을 통해 Primary로 연결됨
+        return 3
 
     def get_status(self):
         """컨트롤러 상태 반환"""
         return {
-            'controller': 'secondary',
+            'controller': 'enhanced_secondary',
             'managed_switches': list(self.managed_switches),
             'connected_switches': list(self.datapaths.keys()),
             'learned_macs': {f's{dpid}': len(mac_table) 
-                           for dpid, mac_table in self.mac_to_port.items()}
+                           for dpid, mac_table in self.mac_to_port.items()},
+            'cross_controller_hosts': len(self.primary_hosts)
         }

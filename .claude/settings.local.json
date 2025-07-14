@@ -57,7 +57,10 @@
       "Bash(git push:*)",
       "Bash(sudo ip netns:*)",
       "Bash(sudo systemctl status:*)",
-      "Bash(ip link:*)"
+      "Bash(ip link:*)",
+      "Bash(tmux new-session:*)",
+      "Bash(tmux kill-session:*)",
+      "Bash(tmux new-window:*)"
     ],
     "deny": []
   }

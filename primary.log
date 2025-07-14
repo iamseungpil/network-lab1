@@ -1,5 +1,0 @@
-loading app ryu-controller/primary_controller.py
-loading app ryu.controller.ofp_handler
-instantiating app ryu-controller/primary_controller.py of PrimaryController
-Primary Controller initialized - managing switches s1-s5
-instantiating app ryu.controller.ofp_handler of OFPHandler
