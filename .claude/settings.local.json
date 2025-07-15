@@ -60,7 +60,8 @@
       "Bash(ip link:*)",
       "Bash(tmux new-session:*)",
       "Bash(tmux kill-session:*)",
-      "Bash(tmux new-window:*)"
+      "Bash(tmux new-window:*)",
+      "Bash(tmux list-windows:*)"
     ],
     "deny": []
   }

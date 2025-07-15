@@ -118,9 +118,8 @@ class EnhancedSecondaryController(app_manager.RyuApp):
         dst = eth.dst
         src = eth.src
 
-        # 브로드캐스트/멀티캐스트 처리
+        # 브로드캐스트/멀티캐스트 처리 (로그 생략)
         if dst == 'ff:ff:ff:ff:ff:ff' or dst.startswith('33:33:'):
-            self.logger.info(f"Secondary: Broadcast/Multicast from {src} on s{dpid}")
             out_port = ofproto.OFPP_FLOOD
             actions = [parser.OFPActionOutput(out_port)]
             data = None
@@ -131,32 +130,32 @@ class EnhancedSecondaryController(app_manager.RyuApp):
             datapath.send_msg(out)
             return
 
-        self.logger.info(f"Secondary: Packet from {src} to {dst} on switch s{dpid} port {in_port}")
+        # 유니캐스트 패킷만 로그 출력
+        self.logger.info(f"[SECONDARY-PACKET] {src} → {dst} on s{dpid}:{in_port}")
 
         # MAC 주소 학습
         if src not in self.mac_to_port[dpid]:
             self.mac_to_port[dpid][src] = in_port
             self.global_mac_table[src] = (dpid, in_port)
-            self.logger.info(f"Secondary: Learned {src} is at s{dpid} port {in_port}")
+            self.logger.info(f"[SECONDARY-LEARN] {src} learned at s{dpid}:{in_port}")
 
         # 목적지 MAC 주소에 따른 포워딩 결정
         if dst in self.mac_to_port[dpid]:
             # 같은 스위치 내 로컬 전달
             out_port = self.mac_to_port[dpid][dst]
-            self.logger.info(f"Secondary: Local forwarding to s{dpid} port {out_port}")
+            # 로컬 전달은 로그 생략
         elif dst in self.global_mac_table:
             # 다른 Secondary 스위치로 전달
             target_dpid, target_port = self.global_mac_table[dst]
             out_port = self._find_next_hop(dpid, target_dpid)
-            self.logger.info(f"Secondary: Forwarding to s{target_dpid} via port {out_port}")
+            self.logger.info(f"[SECONDARY-ROUTE] s{dpid} → s{target_dpid} via port {out_port}")
         elif dst in self.primary_hosts:
             # Primary Controller 영역으로 전달
             out_port = self._get_gateway_port_to_primary(dpid, dst)
-            self.logger.info(f"Secondary: Cross-controller forwarding to Primary via port {out_port}")
+            self.logger.info(f"[SECONDARY-CROSS] s{dpid} → Primary via port {out_port} (to {dst})")
         else:
-            # 알 수 없는 목적지 - 플러딩
+            # 알 수 없는 목적지 - 플러딩 (로그 생략)
             out_port = ofproto.OFPP_FLOOD
-            self.logger.info(f"Secondary: Unknown destination {dst} - flooding")
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -164,7 +163,7 @@ class EnhancedSecondaryController(app_manager.RyuApp):
         if out_port != ofproto.OFPP_FLOOD:
             match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
             self.add_flow(datapath, 1, match, actions, msg.buffer_id)
-            self.logger.info(f"Secondary: Flow installed on s{dpid}: {src} -> {dst} out port {out_port}")
+            self.logger.info(f"[SECONDARY-FLOW] s{dpid}: {src}→{dst} installed (port {out_port})")
             return
 
         # Packet Out
