@@ -1,6 +1,6 @@
-# SDN Multi-Controller Lab with Cross-Controller Communication
+# SDN Multi-Controller Lab with Gateway-based Cross-Controller Communication
 
-크로스 컨트롤러 통신을 지원하는 다중 컨트롤러 SDN 환경입니다.
+게이트웨이 기반 크로스 컨트롤러 통신을 지원하는 다중 컨트롤러 SDN 환경입니다.
 
 ## 🚀 완전한 설치 가이드
 
@@ -51,16 +51,6 @@ source ~/.bashrc
 conda --version
 ```
 
-#### 기존 Anaconda/Miniconda가 있는 경우
-```bash
-# 기존 conda 환경 확인
-conda info
-conda env list
-
-# 충돌 방지를 위해 base 환경 비활성화 (선택사항)
-conda config --set auto_activate_base false
-```
-
 ### 3단계: 프로젝트 클론 및 환경 설정
 
 ```bash
@@ -94,10 +84,6 @@ chmod +x start_sdn.sh stop_sdn.sh
 
 # sudo 권한 확인 (Mininet 실행에 필요)
 sudo -v
-
-# 사용자를 docker 그룹에 추가 (Docker 사용 시)
-sudo usermod -aG docker $USER
-newgrp docker  # 또는 로그아웃 후 재로그인
 ```
 
 ### 5단계: 환경 테스트
@@ -117,14 +103,14 @@ mininet> exit
 
 ## 개요
 
-이 프로젝트는 10개의 OpenFlow 스위치와 20개의 호스트를 사용하여 두 개의 독립적인 RYU 컨트롤러가 서로 다른 네트워크 영역을 관리하는 SDN 환경을 구현합니다. **Enhanced Controllers**를 통해 크로스 컨트롤러 통신을 지원합니다.
+이 프로젝트는 10개의 OpenFlow 스위치와 20개의 호스트를 사용하여 두 개의 독립적인 RYU 컨트롤러가 서로 다른 네트워크 영역을 관리하는 SDN 환경을 구현합니다. **Gateway-based Controllers**를 통해 효율적인 크로스 컨트롤러 통신을 지원합니다.
 
 ### 네트워크 구성
 - **Primary Controller (포트 6700)**: 스위치 s1-s5 관리
 - **Secondary Controller (포트 6800)**: 스위치 s6-s10 관리
 - **호스트**: 각 스위치에 2개씩 총 20개 (h1-h20)
 - **토폴로지**: 트리 구조 (s1이 루트)
-- **크로스 컨트롤러 통신**: 지원 ✅
+- **Gateway-based 크로스 컨트롤러 통신**: 지원 ✅
 
 ## ⚡ 빠른 시작 (환경 설정 완료 후)
 
@@ -135,7 +121,7 @@ conda activate sdn-lab
 # SDN 환경 실행
 ./start_sdn.sh
 
-# 성공 시 Mininet CLI 진입:
+# 성공 시 자동 테스트 없이 바로 Mininet CLI 진입:
 # mininet> 
 ```
 
@@ -154,11 +140,26 @@ conda activate sdn-lab
 - Primary Controller (포트 6700): s1, s2, s3, s4, s5
 - Secondary Controller (포트 6800): s6, s7, s8, s9, s10
 
-크로스 컨트롤러 게이트웨이:
+Gateway-based 크로스 컨트롤러 통신:
 - s3 ↔ s6, s7 (Primary ↔ Secondary)
 - s4 ↔ s8, s9 (Primary ↔ Secondary)
 - s5 ↔ s10 (Primary ↔ Secondary)
 ```
+
+## Gateway-based 크로스 컨트롤러 통신
+
+### 구현 방식
+1. **MAC 주소 기반 도메인 판단**:
+   - Primary 도메인: MAC 주소 0x01-0x0a (h1-h10)
+   - Secondary 도메인: MAC 주소 0x0b-0x14 (h11-h20)
+
+2. **간소화된 게이트웨이 라우팅**:
+   - Primary → Secondary: 기본 게이트웨이 s3 사용
+   - Secondary → Primary: 모든 Secondary 스위치는 포트 3으로 연결
+
+3. **효율적인 패킷 처리**:
+   - 사전 정의된 호스트 테이블 대신 실시간 MAC 주소 분석
+   - 동적 플로우 룰 설치
 
 ## 사용 방법
 
@@ -169,7 +170,7 @@ conda activate sdn-lab
 h1 ping -c 3 h2    # Primary 내부 통신
 h11 ping -c 3 h12  # Secondary 내부 통신
 
-# 크로스 컨트롤러 통신 (ARP 설정 필요)
+# Gateway-based 크로스 컨트롤러 통신 (ARP 설정 필요)
 h1 arp -s 10.0.0.11 00:00:00:00:00:0b
 h11 arp -s 10.0.0.1 00:00:00:00:00:01
 h1 ping -c 3 h11   # Primary ↔ Secondary 통신 ✅
@@ -203,15 +204,6 @@ pingall      # 모든 호스트 간 통신 테스트
 | h17-h18 | 10.0.0.17-18 | 00:00:00:00:00:11-12 | s9 | Secondary |
 | h19-h20 | 10.0.0.19-20 | 00:00:00:00:00:13-14 | s10 | Secondary |
 
-## 크로스 컨트롤러 통신
-
-### 구현 방식
-1. **Enhanced Controllers**: 각 컨트롤러가 상대방 영역의 호스트 정보를 사전 정의
-2. **게이트웨이 라우팅**: 
-   - Primary → Secondary: s3(→s6,s7), s4(→s8,s9), s5(→s10)
-   - Secondary → Primary: 모든 Secondary 스위치는 포트 3으로 연결
-3. **플로우 룰 자동 설치**: 패킷 수신 시 경로 계산 후 플로우 룰 설치
-
 ## 🧪 테스트 방법
 
 ### 1단계: 기본 연결성 테스트
@@ -233,7 +225,7 @@ mininet> h11 ping -c 3 h12  # Secondary 내부 (s6)
 mininet> h13 ping -c 3 h14  # Secondary 내부 (s7)
 ```
 
-### 2단계: 크로스 컨트롤러 통신 테스트
+### 2단계: Gateway-based 크로스 컨트롤러 통신 테스트
 
 #### 테스트 시나리오 A: h1(Primary) ↔ h11(Secondary)
 ```bash
@@ -266,18 +258,19 @@ mininet> h10 ping -c 5 h20
 mininet> h20 ping -c 5 h10
 ```
 
-### 3단계: 성능 및 Flow 분석
+### 3단계: 컨트롤러 로그 모니터링
 
-#### 대역폭 테스트
-```bash
-# iperf를 이용한 대역폭 측정
-mininet> iperf h1 h11         # 크로스 컨트롤러 대역폭
-mininet> iperf h1 h2          # 같은 컨트롤러 대역폭 (비교용)
-
-# 기대 결과: 10Mbps 정도 (가상 환경)
+#### 로그에서 확인할 내용
+```
+Gateway-based 로그 예시:
+[PRIMARY-PACKET] 00:00:00:00:00:01 → 00:00:00:00:00:0b on s1:1
+[PRIMARY-LEARN] 00:00:00:00:00:01 learned at s1:1
+[PRIMARY-GATEWAY] s1 → Secondary via gateway port 4
+[PRIMARY-FLOW] s1: 00:00:00:00:00:01→00:00:00:00:00:0b installed (port 4)
 ```
 
-#### Flow 테이블 분석
+### 4단계: Flow 테이블 분석
+
 ```bash
 # OpenFlow 룰 확인
 mininet> sh ovs-ofctl -O OpenFlow13 dump-flows s1
@@ -291,103 +284,12 @@ mininet> sh ovs-ofctl -O OpenFlow13 dump-flows s1 | grep n_packets
 mininet> sh for i in {1..10}; do echo "=== s$i ==="; ovs-ofctl -O OpenFlow13 dump-flows s$i; done
 ```
 
-### 4단계: 컨트롤러 로그 모니터링
+### 5단계: 전체 연결성 테스트
 
-#### 별도 터미널에서 로그 확인
 ```bash
-# 새 터미널 열기
-tmux attach-session -t sdn-lab
-
-# 또는 tmux 창 분할
-Ctrl+b "    # 수평 분할
-Ctrl+b %    # 수직 분할
-
-# Primary Controller 로그 모니터링
-# [PRIMARY-PACKET], [PRIMARY-CROSS], [PRIMARY-FLOW] 태그 확인
-
-# Secondary Controller 로그 모니터링  
-# [SECONDARY-PACKET], [SECONDARY-CROSS], [SECONDARY-FLOW] 태그 확인
-```
-
-#### 로그에서 확인할 내용
-```
-로그 예시:
-[PRIMARY-PACKET] 00:00:00:00:00:01 → 00:00:00:00:00:0b on s1:1
-[PRIMARY-LEARN] 00:00:00:00:00:01 learned at s1:1
-[PRIMARY-CROSS] s1 → Secondary via port 4 (to 00:00:00:00:00:0b)
-[PRIMARY-FLOW] s1: 00:00:00:00:00:01→00:00:00:00:00:0b installed (port 4)
-```
-
-### 5단계: 고급 테스트
-
-#### 다중 연결 테스트
-```bash
-# 여러 호스트 동시 통신
-mininet> h1 ping h11 &
-mininet> h5 ping h15 &  
-mininet> h10 ping h20 &
-mininet> jobs          # 백그라운드 작업 확인
-```
-
-#### 전체 연결성 테스트
-```bash
-# 모든 ARP 설정 후 전체 테스트
-mininet> h1 arp -s 10.0.0.11 00:00:00:00:00:0b
-mininet> h1 arp -s 10.0.0.15 00:00:00:00:00:0f
-mininet> h1 arp -s 10.0.0.20 00:00:00:00:00:14
-# ... (모든 크로스 컨트롤러 ARP 설정)
-
+# 전체 연결성 테스트
 mininet> pingall       # 전체 연결성 확인
 ```
-
-### 6단계: 문제 해결
-
-#### 연결 실패 시 점검사항
-```bash
-# 1. 컨트롤러 상태 확인
-ps aux | grep ryu-manager
-
-# 2. 스위치 연결 상태 확인
-sudo ovs-vsctl show
-
-# 3. 포트 상태 확인
-sudo ovs-ofctl -O OpenFlow13 show s1
-
-# 4. ARP 테이블 확인
-mininet> h1 arp -a
-
-# 5. 라우팅 테이블 확인
-mininet> h1 route -n
-```
-
-### 테스트 시나리오 요약
-
-| 테스트 | 소스 | 목적지 | 경로 | 목적 |
-|--------|------|--------|------|------|
-| 기본 | h1 | h2 | s1 내부 | Primary 내부 통신 |
-| 게이트웨이 | h1 | h11 | s1→s3→s6 | 크로스 컨트롤러 |
-| 직접연결 | h10 | h20 | s5→s10 | 최단 경로 |
-| 성능 | h1 | h11 | iperf | 대역폭 측정 |
-| 전체 | all | all | pingall | 전체 연결성 |
-
-### 제한사항 및 개선 방안
-- **현재 제한**: ARP 브로드캐스트가 컨트롤러 경계를 넘지 않음
-- **해결 방법**: 수동 ARP 설정 또는 ARP 프록시 구현
-- **프로덕션 환경**: 컨트롤러 간 REST API 통신으로 MAC 테이블 공유
-
-### 🎯 테스트 성공 기준
-
-✅ **성공 시 기대 결과:**
-- 같은 컨트롤러 내 통신: 100% 성공
-- 크로스 컨트롤러 통신: ARP 설정 후 100% 성공  
-- Flow 룰 자동 설치: 로그에서 `[CONTROLLER-FLOW]` 확인
-- 컨트롤러 로그: 패킷 경로 추적 가능
-
-❌ **실패 시 점검사항:**
-- 컨트롤러 프로세스 동작 여부
-- ARP 테이블 설정 여부
-- OpenFlow 연결 상태
-- 네트워크 토폴로지 일치 여부
 
 ## 파일 구조
 
@@ -399,13 +301,18 @@ network-lab1/
 ├── stop_sdn.sh                   # SDN 환경 종료 스크립트
 ├── lab_assignments.md            # 실습 과제
 ├── ryu-controller/
-│   ├── enhanced_primary.py       # Primary Controller (크로스 통신 지원)
-│   └── enhanced_secondary.py     # Secondary Controller (크로스 통신 지원)
+│   ├── gateway_primary.py        # Gateway Primary Controller
+│   └── gateway_secondary.py      # Gateway Secondary Controller
 └── mininet/
-    ├── topology.py               # Mininet 토폴로지 정의
-    ├── test_connectivity.py      # 연결성 테스트 스크립트
-    └── test_scenarios.py         # 시나리오 테스트 스크립트
+    └── topology.py               # Mininet 토폴로지 정의
 ```
+
+## Gateway-based 구현의 장점
+
+1. **간소화된 라우팅**: MAC 주소 기반 도메인 판단으로 복잡한 호스트 테이블 불필요
+2. **효율적인 패킷 처리**: 실시간 MAC 주소 분석으로 동적 라우팅
+3. **확장성**: 새로운 호스트 추가 시 별도 설정 불필요
+4. **유지보수성**: 코드 구조가 간단하고 이해하기 쉬움
 
 ## 설치 및 환경 설정
 
@@ -467,34 +374,6 @@ sh ovs-ofctl -O OpenFlow13 dump-flows <switch>
 # Primary/Secondary Controller 터미널에서 로그 확인
 ```
 
-## 고급 테스트
-
-### 성능 테스트
-```bash
-# 대역폭 측정
-iperf h1 h11
-
-# 다중 경로 테스트
-h1 ping h11 &
-h5 ping h15 &
-h10 ping h20 &
-```
-
-### 플로우 분석
-```bash
-# 특정 스위치의 플로우 통계
-sh ovs-ofctl -O OpenFlow13 dump-flows s3
-
-# 플로우 카운터 확인
-sh ovs-ofctl -O OpenFlow13 dump-flows s1 | grep n_packets
-
-# 모든 스위치 플로우 확인
-for i in {1..10}; do 
-    echo "=== Switch s$i ==="
-    sh ovs-ofctl -O OpenFlow13 dump-flows s$i
-done
-```
-
 ## 🛑 환경 종료
 
 ### 정상 종료
@@ -520,23 +399,11 @@ sudo ip link | grep ovs | awk '{print $2}' | sed 's/:$//' | xargs -I {} sudo ip 
 sudo ovs-vsctl list-br | xargs -I {} sudo ovs-vsctl del-br {}
 ```
 
-### tmux 세션 관리
-```bash
-# 세션 목록 확인
-tmux list-sessions
-
-# SDN 세션 종료
-tmux kill-session -t sdn-lab
-
-# 모든 tmux 세션 종료
-tmux kill-server
-```
-
 ## 학습 목표
 
-1. **Multi-Controller SDN**: 분산 컨트롤러 아키텍처 이해
-2. **Cross-Controller Communication**: 컨트롤러 간 통신 구현
-3. **L2 Learning Switch**: MAC 주소 학습 및 포워딩
+1. **Gateway-based Multi-Controller SDN**: 게이트웨이 기반 분산 컨트롤러 아키텍처
+2. **MAC 주소 기반 도메인 라우팅**: 효율적인 크로스 컨트롤러 통신
+3. **동적 플로우 룰 관리**: 실시간 패킷 분석 및 라우팅
 4. **OpenFlow 1.3**: 플로우 룰 설치 및 관리
 5. **Network Segmentation**: 네트워크 도메인 분리 및 관리
 

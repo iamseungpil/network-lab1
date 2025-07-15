@@ -43,15 +43,15 @@ cd "$(dirname "$0")"
 
 echo "Starting controllers..."
 
-# Enhanced Primary Controller 시작 (포트 6700) - 크로스 컨트롤러 통신 지원
-echo "Starting Enhanced Primary Controller (s1-s5) on port 6700..."
-ryu-manager ryu-controller/enhanced_primary.py --ofp-tcp-listen-port 6700 --verbose &
+# Gateway Primary Controller 시작 (포트 6700) - 게이트웨이 기반 크로스 컨트롤러 통신
+echo "Starting Gateway Primary Controller (s1-s5) on port 6700..."
+ryu-manager ryu-controller/gateway_primary.py --ofp-tcp-listen-port 6700 &
 PRIMARY_PID=$!
 sleep 2
 
-# Enhanced Secondary Controller 시작 (포트 6800) - 크로스 컨트롤러 통신 지원
-echo "Starting Enhanced Secondary Controller (s6-s10) on port 6800..."
-ryu-manager ryu-controller/enhanced_secondary.py --ofp-tcp-listen-port 6800 --verbose &
+# Gateway Secondary Controller 시작 (포트 6800) - 게이트웨이 기반 크로스 컨트롤러 통신
+echo "Starting Gateway Secondary Controller (s6-s10) on port 6800..."
+ryu-manager ryu-controller/gateway_secondary.py --ofp-tcp-listen-port 6800 &
 SECONDARY_PID=$!
 sleep 2
 
@@ -78,7 +78,8 @@ echo
 echo "Starting Mininet topology..."
 echo "This will start the network with 10 switches and 20 hosts"
 echo
-echo "NOTE: For cross-controller communication, you may need to set up ARP entries manually"
+echo "NOTE: Gateway-based cross-controller communication enabled"
+echo "MAC address-based domain routing: Primary(01-0a), Secondary(0b-14)"
 echo "Example: h1 arp -s 10.0.0.11 00:00:00:00:00:0b"
 echo
 

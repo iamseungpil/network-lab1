@@ -143,19 +143,7 @@ def run_topology():
         for switch in net.switches:
             info(f'Switch {switch.name}: DPID {switch.dpid}\n')
         
-        info('\n*** Testing basic connectivity\n')
-        
-        # 기본 연결성 테스트
-        info('*** Testing ping between hosts\n')
-        h1 = net.get('h1')
-        h2 = net.get('h2')
-        info(f'Ping from h1 to h2: ')
-        result = net.ping([h1, h2])
-        
-        if result == 0:
-            info('SUCCESS - Controllers are working!\n')
-        else:
-            info('Check controller connections\n')
+        info('\n*** Network ready for testing\n')
         
         info('\n*** Available commands in CLI:\n')
         info('- pingall: Test connectivity between all hosts\n')
