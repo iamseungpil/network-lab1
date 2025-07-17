@@ -1,0 +1,4 @@
+# RYU SDN Controller
+ryu==4.34
+
+# Mininet은 apt로 설치됨

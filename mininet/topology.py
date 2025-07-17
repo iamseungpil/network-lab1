@@ -92,7 +92,9 @@ def run_topology():
     
     try:
         info('*** Starting network\n')
+        info('*** Starting Mininet network...\n')
         net.start()
+        info('*** Network started successfully\n')
         
         info('*** Assigning switches to controllers\n')
         
@@ -114,16 +116,16 @@ def run_topology():
         for switch in primary_switches:
             switch.start([c1])
             info(f'Starting {switch.name} with Primary Controller\n')
-            time.sleep(0.5)
+            time.sleep(0.1)
             
         for switch in secondary_switches:
             switch.start([c2])
             info(f'Starting {switch.name} with Secondary Controller\n') 
-            time.sleep(0.5)
+            time.sleep(0.1)
         
         # 컨트롤러 연결 대기
         info('*** Waiting for controller connections...\n')
-        time.sleep(5)  # 더 긴 대기 시간
+        time.sleep(3)  # 컨트롤러 연결 대기
         
         # 스위치 연결 상태 확인
         info('*** Verifying switch connections...\n')

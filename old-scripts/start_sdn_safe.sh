@@ -3,6 +3,9 @@
 echo "=== Starting SDN Environment ==="
 echo
 
+# Signal handler 설정 - Ctrl+C를 가로채서 적절히 처리
+trap 'echo ""; echo "Use '\''exit'\'' to quit Mininet, or Ctrl+A,D to detach from screen"; return 2>/dev/null || true' INT
+
 # Python 환경 확인
 echo "Python environment check:"
 echo "  Python version: $(python3 --version)"
@@ -31,32 +34,17 @@ cd "$(dirname "$0")"
 
 echo "Starting controllers..."
 
-# 로그 파일 준비
-LOG_DIR="/tmp/sdn-logs"
-mkdir -p $LOG_DIR
-
 # Gateway Primary Controller 시작 (포트 6700) - 게이트웨이 기반 크로스 컨트롤러 통신
 echo "Starting Gateway Primary Controller (s1-s5) on port 6700..."
-ryu-manager ryu-controller/gateway_primary.py --ofp-tcp-listen-port 6700 2>&1 | tee $LOG_DIR/primary.log &
+ryu-manager ryu-controller/gateway_primary.py --ofp-tcp-listen-port 6700 &
 PRIMARY_PID=$!
 sleep 2
 
-# Gateway Secondary Controller 시앙 (포트 6800) - 게이트웨이 기반 크로스 컨트롤러 통신
+# Gateway Secondary Controller 시작 (포트 6800) - 게이트웨이 기반 크로스 컨트롤러 통신
 echo "Starting Gateway Secondary Controller (s6-s10) on port 6800..."
-ryu-manager ryu-controller/gateway_secondary.py --ofp-tcp-listen-port 6800 2>&1 | tee $LOG_DIR/secondary.log &
+ryu-manager ryu-controller/gateway_secondary.py --ofp-tcp-listen-port 6800 &
 SECONDARY_PID=$!
 sleep 2
-
-# 로그 모니터링 시작
-echo ""
-echo "=== Controller logs will be displayed below ==="
-# echo "=== Press Enter to continue to Mininet CLI ==="
-echo ""
-tail -f $LOG_DIR/primary.log $LOG_DIR/secondary.log &
-TAIL_PID=$!
-
-# Enter를 기다림
-# read -p ""
 
 echo "Controllers started successfully!"
 echo "Primary Controller PID: $PRIMARY_PID"
@@ -85,24 +73,16 @@ echo "NOTE: Gateway-based cross-controller communication enabled"
 echo "MAC address-based domain routing: Primary(01-0a), Secondary(0b-14)"
 echo "Example: h1 arp -s 10.0.0.11 00:00:00:00:00:0b"
 echo
-
-# tail 프로세스 종료
-kill $TAIL_PID 2>/dev/null
-
-echo
-echo "=== Starting Mininet CLI ==="
-echo "Note: Controller logs are saved in $LOG_DIR/"
-echo "To monitor logs in another terminal: tail -f $LOG_DIR/*.log"
+echo "=== Ctrl+C is handled - use 'exit' to quit Mininet ==="
 echo
 
-# Mininet 토폴로지 실행
+# Mininet 토폴로지 실행 (signal handling 포함)
 python3 mininet/topology.py
 
 # 종료 시 정리
 echo
 echo "Cleaning up..."
 pkill -f ryu-manager > /dev/null 2>&1
-pkill -f "tail -f" > /dev/null 2>&1
 mn -c > /dev/null 2>&1
 
 echo "SDN environment stopped."

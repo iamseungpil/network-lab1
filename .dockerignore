@@ -1,0 +1,41 @@
+# Windows 전용 스크립트 백업
+old-windows-scripts/
+
+# Git 관련
+.git/
+.gitignore
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 로컬 설정
+.env
+.env.local
+
+# 로그 파일
+*.log
+
+# OS 관련
+.DS_Store
+Thumbs.db
+
+# Claude 관련
+.claude/
+
+# 문서 (필요시 제외)
+# *.md
+# !README.md

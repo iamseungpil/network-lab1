@@ -1,0 +1,83 @@
+# Ubuntu 20.04 - 안정적인 Python 3.8 환경
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+
+# 필수 패키지만 설치
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-dev \
+    git \
+    net-tools \
+    iputils-ping \
+    iproute2 \
+    openvswitch-switch \
+    openvswitch-common \
+    mininet \
+    curl \
+    vim \
+    screen \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리
+WORKDIR /network-lab
+
+# Python 환경 설정
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# RYU 의존성 문제 해결
+RUN pip3 install \
+    eventlet==0.30.2 \
+    dnspython==1.16.0 \
+    greenlet==1.1.2
+
+# RYU 설치
+RUN pip3 install ryu==4.34
+
+# 프로젝트 복사
+COPY . .
+
+# 스크립트 실행 권한
+RUN chmod +x /network-lab/*.sh
+
+# OVS 디렉토리 생성
+RUN mkdir -p /var/run/openvswitch /var/log/openvswitch
+
+# 간단한 시작 스크립트
+RUN echo '#!/bin/bash\n\
+echo "=== Starting SDN Lab ==="\n\
+echo\n\
+# OVS 시작\n\
+echo "Starting Open vSwitch..."\n\
+service openvswitch-switch start || {\n\
+    echo "Starting OVS manually..."\n\
+    ovsdb-server --remote=punix:/var/run/openvswitch/db.sock \\\n\
+                 --remote=db:Open_vSwitch,Open_vSwitch,manager_options \\\n\
+                 --pidfile --detach --log-file\n\
+    ovs-vsctl --no-wait init\n\
+    ovs-vswitchd --pidfile --detach --log-file\n\
+}\n\
+sleep 2\n\
+ovs-vsctl show\n\
+echo\n\
+# 환경 확인\n\
+echo "Python: $(python3 --version)"\n\
+echo "RYU: $(ryu-manager --version 2>&1 | head -1)"\n\
+echo "Mininet: $(mn --version)"\n\
+echo\n\
+# 원본 스크립트 실행 또는 bash 시작\n\
+if [ -f /network-lab/start_sdn.sh ]; then\n\
+    cd /network-lab\n\
+    exec ./start_sdn.sh\n\
+else\n\
+    echo "Ready! You can now run your SDN experiments."\n\
+    exec bash\n\
+fi\n\
+' > /start.sh && chmod +x /start.sh
+
+EXPOSE 6700 6800
+
+ENTRYPOINT ["/start.sh"]
