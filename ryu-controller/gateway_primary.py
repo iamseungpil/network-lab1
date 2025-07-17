@@ -213,6 +213,14 @@ class GatewayPrimaryController(app_manager.RyuApp):
         """Secondary 도메인으로 가는 게이트웨이 포트 찾기"""
         # 기본 게이트웨이 s3로 라우팅
         gateway_switch = self.secondary_gateway['default']
+        
+        if dpid == gateway_switch:
+            # 토폴로지상 s3는 포트 4(->s6)와 포트 5(->s7)로 Secondary와 연결됩니다.
+            # 여기서는 s6으로 가는 포트 4를 기본 게이트웨이 경로로 사용합니다.
+            # 더 정교한 로직(예: 로드 밸런싱)을 추가할 수 있습니다.
+            return 4  # s3 -> s6 port
+
+        
         return self._find_next_hop(dpid, gateway_switch)
 
     def get_status(self):

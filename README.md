@@ -4,51 +4,172 @@
 
 ## 🚀 완전한 설치 가이드
 
-### 1단계: Ubuntu VM 설치
+### 1단계: VirtualBox 설치 및 Ubuntu VM 생성
 
-#### VirtualBox/VMware 사용
+#### VirtualBox 설치 (Windows/macOS/Linux)
+
+**Windows:**
 ```bash
-# Ubuntu 20.04 LTS 이상 권장
-# 최소 사양:
-#   - RAM: 4GB 이상
-#   - 디스크: 20GB 이상
-#   - CPU: 2코어 이상
-#   - 네트워크: NAT 또는 Bridge 모드
+# 1. VirtualBox 공식 사이트에서 다운로드
+https://www.virtualbox.org/wiki/Downloads
+# - "Windows hosts" 링크 클릭
+# - VirtualBox-7.0.x-Win.exe 다운로드 및 실행
+# - 기본 설정으로 설치 진행
 
-# Ubuntu 설치 후 필수 패키지
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl wget git vim build-essential
+# 2. VirtualBox Extension Pack 다운로드 (선택사항)
+# - 같은 페이지에서 "VirtualBox Extension Pack" 다운로드
+# - VirtualBox에서 파일 > 환경설정 > 확장 > 패키지 추가
 ```
 
-#### AWS EC2/클라우드 사용
+**macOS:**
 ```bash
-# Ubuntu 20.04 LTS AMI 선택
-# 인스턴스 타입: t3.medium 이상 권장
-# 보안 그룹: SSH(22) 포트 오픈
+# 1. Homebrew 이용 (권장)
+brew install --cask virtualbox
 
-# 접속 후
+# 2. 또는 공식 사이트에서 직접 다운로드
+https://www.virtualbox.org/wiki/Downloads
+# - "OS X hosts" 링크 클릭
+# - VirtualBox-7.0.x-OSX.dmg 다운로드 및 설치
+
+# 3. 시스템 환경설정에서 보안 권한 허용 필요
+# 시스템 환경설정 > 보안 및 개인정보 보호 > 일반
+# "확인되지 않은 개발자의 앱 허용" 체크
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+# 1. 공식 저장소 추가
+wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
+echo "deb [arch=amd64] http://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" | sudo tee /etc/apt/sources.list.d/virtualbox.list
+
+# 2. VirtualBox 설치
+sudo apt update
+sudo apt install virtualbox-7.0
+
+# 3. 사용자를 vboxusers 그룹에 추가
+sudo usermod -a -G vboxusers $USER
+newgrp vboxusers
+```
+
+#### Ubuntu VM 생성
+
+```bash
+# 1. Ubuntu ISO 다운로드
+# https://ubuntu.com/download/desktop
+# - Ubuntu 22.04 LTS Desktop 다운로드 (권장)
+# - 또는 Ubuntu 20.04 LTS Desktop
+
+# 2. VirtualBox에서 새 가상머신 생성
+# VirtualBox 실행 > 새로 만들기(N) 클릭
+
+이름: SDN-Lab
+종류: Linux
+버전: Ubuntu (64-bit)
+
+메모리: 4096 MB (4GB) 이상 권장
+하드디스크: 새 가상 하드디스크 만들기
+파일 위치: 기본값 사용
+파일 크기: 25 GB 이상 권장
+하드디스크 파일 종류: VDI (VirtualBox 디스크 이미지)
+물리적 하드디스크에 저장: 동적 할당 (권장)
+
+# 3. VM 설정 조정 (VM 선택 후 설정 클릭)
+일반 > 고급:
+  - 클립보드 공유: 양방향
+  - 드래그 앤 드롭: 양방향
+
+시스템 > 프로세서:
+  - 프로세서 개수: 2개 이상 (가능한 경우)
+  - PAE/NX 사용: 체크
+
+저장소:
+  - 컨트롤러: IDE > 빈 CD 선택
+  - 디스크 아이콘 클릭 > "가상 광학 디스크 파일 선택"
+  - 다운로드한 Ubuntu ISO 파일 선택
+
+네트워크:
+  - 어댑터 1: NAT (기본값)
+  - 고급 > 어댑터 종류: Intel PRO/1000 MT Desktop
+
+# 4. Ubuntu 설치
+# 시작 버튼 클릭하여 VM 부팅
+# Ubuntu 설치 진행:
+#   - 한국어 선택
+#   - 일반 설치 선택
+#   - 디스크를 지우고 Ubuntu 설치
+#   - 사용자 계정 생성 (예: ubuntu)
+#   - 설치 완료 후 재부팅
+
+# 5. Guest Additions 설치 (중요!)
+# Ubuntu 부팅 후 터미널에서:
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl wget git vim
+sudo apt install -y build-essential dkms linux-headers-$(uname -r)
+
+# VirtualBox 메뉴: 장치 > Guest Additions CD 이미지 삽입
+# 자동 실행 또는 수동으로:
+sudo mount /dev/cdrom /mnt
+sudo /mnt/VBoxLinuxAdditions.run
+sudo reboot
+
+# 6. 기본 패키지 설치
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y curl wget git vim build-essential net-tools
+```
+
+#### VM 성능 최적화 팁
+
+```bash
+# 1. 스왑 파일 크기 증가 (메모리가 부족한 경우)
+sudo swapoff -a
+sudo dd if=/dev/zero of=/swapfile bs=1G count=2
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 2. 불필요한 서비스 비활성화
+sudo systemctl disable snapd
+sudo systemctl disable cups
+sudo systemctl disable bluetooth
+
+# 3. 화면 해상도 조정
+# 설정 > 디스플레이에서 해상도 조정
+# Guest Additions 설치 후 자동 조정 가능
 ```
 
 ### 2단계: Conda 설치
 
 #### Miniforge 설치 (권장)
 ```bash
+# Ubuntu VM에서 터미널 열기 (Ctrl+Alt+T)
+
 # Miniforge 다운로드 및 설치
 wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 chmod +x Miniforge3-Linux-x86_64.sh
 ./Miniforge3-Linux-x86_64.sh
 
 # 설치 중 옵션:
-# - 설치 경로: /home/ubuntu/miniforge3 (기본값)
-# - conda init 실행: yes
+# - 라이선스 동의: yes
+# - 설치 경로: /home/ubuntu/miniforge3 (기본값, Enter)
+# - conda init 실행: yes (중요!)
 
 # 터미널 재시작 또는
 source ~/.bashrc
 
+# conda 프롬프트 확인 (터미널 앞에 (base) 표시됨)
 # 설치 확인
 conda --version
+python --version
+```
+
+#### 기존 Anaconda/Miniconda가 있는 경우
+```bash
+# 기존 conda 환경 확인
+conda info
+conda env list
+
+# 충돌 방지를 위해 base 환경 비활성화 (선택사항)
+conda config --set auto_activate_base false
 ```
 
 ### 3단계: 프로젝트 클론 및 환경 설정
@@ -317,10 +438,20 @@ network-lab1/
 ## 설치 및 환경 설정
 
 ### 필수 요구사항
-- Ubuntu 20.04 이상
-- Python 3.9 (권장)
-- Conda (Miniforge 권장)
-- sudo 권한
+
+#### 호스트 시스템
+- **Windows 10/11, macOS 10.14+, 또는 Linux**
+- **메모리**: 8GB 이상 (VM에 4GB 할당)
+- **디스크 공간**: 30GB 이상 여유 공간
+- **프로세서**: Intel/AMD 64-bit, 가상화 지원
+
+#### 가상머신 (Ubuntu)
+- **Ubuntu 22.04 LTS 또는 20.04 LTS**
+- **메모리**: 4GB 이상 (VM 설정)
+- **디스크**: 25GB 이상 (VM 하드디스크)
+- **Python 3.9** (권장)
+- **Conda** (Miniforge 권장)
+- **sudo 권한**
 
 ### 상세 설치 과정
 
