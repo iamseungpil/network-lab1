@@ -19,18 +19,18 @@ echo -e "${NC}"
 
 # Check if conda sdn-env exists and works
 if [ -d "/data/miniforge3/envs/sdn-env" ]; then
-    echo -e "${YELLOW}[INFO] Conda environment detected. Using conda version for compatibility...${NC}"
+    echo -e "${YELLOW}[INFO] Conda environment detected. Activating sdn-env...${NC}"
     source /data/miniforge3/etc/profile.d/conda.sh
     conda activate sdn-env
     if ryu-manager --version > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Using conda sdn-env (Python 3.8, RYU $(ryu-manager --version))${NC}"
-        echo -e "${GREEN}[INFO] Redirecting to conda demo for better compatibility...${NC}"
-        echo ""
-        exec ./demo_conda.sh
+    else
+        echo -e "${RED}ERROR: RYU not available in conda environment${NC}"
+        exit 1
     fi
+else
+    echo -e "${YELLOW}[WARNING] Using system RYU - may have eventlet compatibility issues${NC}"
 fi
-
-echo -e "${YELLOW}[WARNING] Using system RYU - may have eventlet compatibility issues${NC}"
 
 # Clean up any existing setup
 echo -e "${YELLOW}[INFO] Performing complete cleanup...${NC}"
@@ -38,7 +38,39 @@ echo -e "${YELLOW}[INFO] Performing complete cleanup...${NC}"
 
 # Start dual controllers
 echo -e "${GREEN}[INFO] Starting dual controller environment...${NC}"
-./start_dual_controllers.sh
+
+# Create tmux session for controllers
+SESSION_NAME="dual_controllers"
+tmux kill-session -t $SESSION_NAME 2>/dev/null
+
+# Create new session with 2 windows
+tmux new-session -d -s $SESSION_NAME -n "primary"
+tmux new-window -t $SESSION_NAME -n "secondary"
+
+# Start Primary Controller
+echo -e "${YELLOW}[INFO] Starting Primary Controller on port 6633...${NC}"
+tmux send-keys -t $SESSION_NAME:0 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6633 ryu-controller/primary_controller.py" Enter
+
+# Start Secondary Controller
+echo -e "${YELLOW}[INFO] Starting Secondary Controller on port 6634...${NC}"
+tmux send-keys -t $SESSION_NAME:1 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6634 ryu-controller/secondary_controller.py" Enter
+
+# Wait for controllers to initialize
+echo -e "${YELLOW}[INFO] Waiting for controllers to initialize...${NC}"
+sleep 8
+
+# Check if controllers are running
+if netstat -ln | grep ":6633 " > /dev/null; then
+    echo -e "${GREEN}✓ Primary Controller (6633) is running${NC}"
+else
+    echo -e "${RED}✗ Primary Controller (6633) failed to start${NC}"
+fi
+
+if netstat -ln | grep ":6634 " > /dev/null; then
+    echo -e "${GREEN}✓ Secondary Controller (6634) is running${NC}"
+else
+    echo -e "${RED}✗ Secondary Controller (6634) failed to start${NC}"
+fi
 
 echo ""
 echo -e "${MAGENTA}${BOLD}Network Topology:${NC}"
