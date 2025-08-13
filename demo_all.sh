@@ -43,17 +43,42 @@ echo -e "${GREEN}[INFO] Starting dual controller environment...${NC}"
 SESSION_NAME="dual_controllers"
 tmux kill-session -t $SESSION_NAME 2>/dev/null
 
-# Create new session with 2 windows
-tmux new-session -d -s $SESSION_NAME -n "primary"
-tmux new-window -t $SESSION_NAME -n "secondary"
-
-# Start Primary Controller
-echo -e "${YELLOW}[INFO] Starting Primary Controller on port 6633...${NC}"
-tmux send-keys -t $SESSION_NAME:0 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6633 ryu-controller/primary_controller.py" Enter
-
-# Start Secondary Controller
-echo -e "${YELLOW}[INFO] Starting Secondary Controller on port 6634...${NC}"
-tmux send-keys -t $SESSION_NAME:1 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6634 ryu-controller/secondary_controller.py" Enter
+# Check if user wants visual mode
+if [[ "$1" == "visual" ]]; then
+    echo -e "${GREEN}[INFO] Starting in VISUAL mode with split panes...${NC}"
+    
+    # Create session with split panes
+    tmux new-session -d -s $SESSION_NAME -n "SDN-Controllers"
+    
+    # Split horizontally (top for controllers, bottom for monitoring)
+    tmux split-window -v -t $SESSION_NAME:0 -p 30
+    
+    # Split top pane vertically (left for primary, right for secondary)
+    tmux split-window -h -t $SESSION_NAME:0.0 -p 50
+    
+    # Start Primary Controller in top-left
+    tmux send-keys -t $SESSION_NAME:0.0 "echo '[PRIMARY CONTROLLER - s1-s5 - Port 6633]' && source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6633 ryu-controller/primary_controller.py" Enter
+    
+    # Start Secondary Controller in top-right
+    tmux send-keys -t $SESSION_NAME:0.1 "echo '[SECONDARY CONTROLLER - s6-s10 - Port 6634]' && source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6634 ryu-controller/secondary_controller.py" Enter
+    
+    # Bottom pane for monitoring
+    tmux send-keys -t $SESSION_NAME:0.2 "echo '[MONITORING] Waiting for tests to start...' && sleep 10 && watch -n 1 'netstat -an | grep -E \"6633|6634\"'" Enter
+    
+    echo -e "${YELLOW}[INFO] Controllers starting in split-pane view...${NC}"
+else
+    # Original mode with separate windows
+    tmux new-session -d -s $SESSION_NAME -n "primary"
+    tmux new-window -t $SESSION_NAME -n "secondary"
+    
+    # Start Primary Controller
+    echo -e "${YELLOW}[INFO] Starting Primary Controller on port 6633...${NC}"
+    tmux send-keys -t $SESSION_NAME:0 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6633 ryu-controller/primary_controller.py" Enter
+    
+    # Start Secondary Controller
+    echo -e "${YELLOW}[INFO] Starting Secondary Controller on port 6634...${NC}"
+    tmux send-keys -t $SESSION_NAME:1 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-env && ryu-manager --ofp-tcp-listen-port 6634 ryu-controller/secondary_controller.py" Enter
+fi
 
 # Wait for controllers to initialize
 echo -e "${YELLOW}[INFO] Waiting for controllers to initialize...${NC}"
