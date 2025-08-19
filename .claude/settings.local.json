@@ -97,7 +97,20 @@
       "Bash(dpkg:*)",
       "Bash(./cleanup_network.sh)",
       "Bash(sudo ip link:*)",
-      "Bash(sudo -E:*)"
+      "Bash(sudo -E:*)",
+      "Bash(/usr/bin/ryu-manager:*)",
+      "Bash(./demo_10switches.sh:*)",
+      "Bash(./monitor_routing.sh:*)",
+      "Bash(./run_unified_demo.sh:*)",
+      "Bash(./run_final_demo.sh:*)",
+      "Bash(/tmp/test_shell_real.sh:*)",
+      "Bash(/tmp/test_simple_dijkstra.sh:*)",
+      "Bash(/tmp/test_fixed_dijkstra.sh:*)",
+      "Bash(/tmp/test_complex_topology.sh:*)",
+      "Bash(tmux rename-window:*)",
+      "Bash(cp:*)",
+      "Bash(tmux split-window:*)",
+      "Bash(./start_sdn_demo.sh:*)"
     ],
     "deny": []
   }

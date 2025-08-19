@@ -20,6 +20,8 @@ class SecondaryController(app_manager.RyuApp):
         self.mac_to_port = {}
         self.topology = self._build_topology()
         self.switches = set()
+        self.datapaths = {}  # Store datapath objects
+        self.mac_to_switch = {}  # Track which switch a MAC is connected to
         
         # Domain configuration
         self.my_switches = {6, 7, 8, 9, 10}  # s6-s10
@@ -41,15 +43,16 @@ class SecondaryController(app_manager.RyuApp):
         
         # Full topology including cross-domain links
         edges = [
-            # Primary domain
+            # Primary domain with loop
             (1, 2, 1), (1, 3, 1),
             (2, 4, 1), (2, 5, 1),
+            (4, 3, 2),  # s4-s3 backup (creates loop!)
             # Cross-domain links
             (3, 6, 2), (3, 7, 2),
             (4, 8, 2), (4, 9, 2),
             (5, 10, 2),
-            # Secondary domain internal (if any)
-            (6, 7, 1), (8, 9, 1)  # Add some internal connections
+            # Secondary domain internal
+            (6, 7, 1), (8, 9, 1)
         ]
         
         for src, dst, weight in edges:
@@ -67,6 +70,7 @@ class SecondaryController(app_manager.RyuApp):
         
         if dpid in self.my_switches:
             self.switches.add(dpid)
+            self.datapaths[dpid] = datapath  # Store datapath
             self.logger.info(f"[SECONDARY] Switch s{dpid} connected")
             
             # Install table-miss flow entry
@@ -162,47 +166,43 @@ class SecondaryController(app_manager.RyuApp):
         
         self.logger.info(f"[SECONDARY] Packet: {src_mac} -> {dst_mac} on s{dpid}:{in_port}")
         
-        # Learn source MAC
+        # Learn source MAC and which switch it's on
         self.mac_to_port.setdefault(dpid, {})
         self.mac_to_port[dpid][src_mac] = in_port
+        self.mac_to_switch[src_mac] = dpid
         
         # Determine output port
         if dst_mac in self.mac_to_port.get(dpid, {}):
             # Known local destination
             out_port = self.mac_to_port[dpid][dst_mac]
             self.logger.info(f"[SECONDARY] Local forwarding s{dpid}: {src_mac}->{dst_mac} via port {out_port}")
-        elif self._is_cross_domain_dst(dst_mac):
-            # Cross-domain communication to primary
-            if dpid in {6, 7}:
-                out_port = 3  # Back to s3
-            elif dpid in {8, 9}:
-                out_port = 3  # Back to s4
-            elif dpid == 10:
-                out_port = 3  # Back to s5
-            else:
-                out_port = ofproto.OFPP_FLOOD
-                
-            self.logger.info(f"[SECONDARY] Cross-domain: s{dpid} -> Primary via port {out_port}")
-        else:
-            # Unknown destination in secondary domain
-            if dpid in self.my_switches:
-                # Try to find path within secondary domain
-                known_switches = [sw for sw in self.my_switches if sw in self.mac_to_port and dst_mac in self.mac_to_port[sw]]
-                if known_switches:
-                    target_switch = known_switches[0]
-                    path, cost = self._dijkstra_path(dpid, target_switch)
-                    if path and len(path) > 1:
-                        next_hop = path[1]
-                        out_port = self._get_next_hop_port(dpid, next_hop)
-                        self.logger.info(f"[SECONDARY] Dijkstra route: {path} via port {out_port}")
-                    else:
-                        out_port = ofproto.OFPP_FLOOD
+        elif dst_mac in self.mac_to_switch:
+            # Destination MAC is known but on a different switch
+            dst_switch = self.mac_to_switch[dst_mac]
+            if dst_switch in self.my_switches:
+                # Calculate path to destination switch
+                path, cost = self._dijkstra_path(dpid, dst_switch)
+                if path and len(path) > 1:
+                    next_hop = path[1]
+                    out_port = self._get_next_hop_port(dpid, next_hop)
+                    self.logger.info(f"[SECONDARY] Routing to s{dst_switch}: path={path} via port {out_port}")
+                    
+                    # Install flows along the entire path
+                    self._install_path_flows(src_mac, dst_mac, path)
                 else:
                     out_port = ofproto.OFPP_FLOOD
             else:
-                out_port = ofproto.OFPP_FLOOD
-                
-            self.logger.info(f"[SECONDARY] Unknown destination {dst_mac}, using port {out_port}")
+                # Destination is in primary domain
+                out_port = self._get_gateway_port(dpid)
+                self.logger.info(f"[SECONDARY] Cross-domain via port {out_port}")
+        elif self._is_cross_domain_dst(dst_mac):
+            # Cross-domain communication to primary
+            out_port = self._get_gateway_port(dpid)
+            self.logger.info(f"[SECONDARY] Cross-domain: s{dpid} -> Primary via port {out_port}")
+        else:
+            # Unknown destination - flood
+            out_port = ofproto.OFPP_FLOOD
+            self.logger.info(f"[SECONDARY] Flooding unknown destination {dst_mac}")
         
         # Install flow and forward packet
         actions = [parser.OFPActionOutput(out_port)]
@@ -238,7 +238,95 @@ class SecondaryController(app_manager.RyuApp):
             self._update_topology_on_failure(dpid, port)
         elif reason == msg.datapath.ofproto.OFPPR_ADD:
             self.logger.info(f"[SECONDARY][LINK-UP] s{dpid} port {port} restored")
+            # Restore topology
+            self._restore_topology_on_recovery(dpid, port)
+    
+    def _clear_flows_for_rerouting(self):
+        """Clear flows on all switches to trigger rerouting"""
+        for dpid, datapath in self.datapaths.items():
+            ofproto = datapath.ofproto
+            parser = datapath.ofproto_parser
+            
+            # Delete all flows except table-miss
+            match = parser.OFPMatch()
+            mod = parser.OFPFlowMod(
+                datapath=datapath,
+                command=ofproto.OFPFC_DELETE,
+                out_port=ofproto.OFPP_ANY,
+                out_group=ofproto.OFPG_ANY,
+                priority=1,
+                match=match
+            )
+            datapath.send_msg(mod)
+            self.logger.info(f"[SECONDARY] Cleared flows on s{dpid} for rerouting")
+    
+    def _restore_topology_on_recovery(self, switch_id, port):
+        """Restore topology when link recovers"""
+        # Port to neighbor mapping for secondary switches
+        port_to_neighbor = {
+            6: {3: 3, 4: 7},           # s6
+            7: {3: 3, 4: 6},           # s7
+            8: {3: 4, 4: 9},           # s8
+            9: {3: 4, 4: 8},           # s9
+            10: {3: 5}                 # s10
+        }
+        
+        neighbor = port_to_neighbor.get(switch_id, {}).get(port)
+        if neighbor and not self.topology.has_edge(switch_id, neighbor):
+            # Restore link with appropriate weight
+            weight = 1 if neighbor in self.my_switches else 2
+            self.topology.add_edge(switch_id, neighbor, weight=weight)
+            self.logger.info(f"[SECONDARY][TOPOLOGY] Restored link s{switch_id}-s{neighbor}")
+            
+            # Clear flows to use new topology
+            self._clear_flows_for_rerouting()
 
+    def _install_path_flows(self, src_mac, dst_mac, path):
+        """Install flow entries along the entire path"""
+        dst_switch = path[-1]
+        dst_port = self.mac_to_port.get(dst_switch, {}).get(dst_mac)
+        
+        if not dst_port:
+            return
+            
+        # Install flows on each switch in the path
+        for i in range(len(path) - 1):
+            curr_switch = path[i]
+            next_switch = path[i + 1]
+            
+            if curr_switch not in self.datapaths:
+                continue
+                
+            datapath = self.datapaths[curr_switch]
+            parser = datapath.ofproto_parser
+            out_port = self._get_next_hop_port(curr_switch, next_switch)
+            
+            if out_port:
+                # Install flow for this destination
+                match = parser.OFPMatch(eth_dst=dst_mac)
+                actions = [parser.OFPActionOutput(out_port)]
+                self.add_flow(datapath, 10, match, actions)
+                self.logger.info(f"[SECONDARY] Installed flow on s{curr_switch}: dst={dst_mac} -> port {out_port}")
+        
+        # Install flow on destination switch
+        if dst_switch in self.datapaths:
+            datapath = self.datapaths[dst_switch]
+            parser = datapath.ofproto_parser
+            match = parser.OFPMatch(eth_dst=dst_mac)
+            actions = [parser.OFPActionOutput(dst_port)]
+            self.add_flow(datapath, 10, match, actions)
+            self.logger.info(f"[SECONDARY] Installed flow on s{dst_switch}: dst={dst_mac} -> port {dst_port}")
+    
+    def _get_gateway_port(self, dpid):
+        """Get gateway port back to primary domain"""
+        if dpid in {6, 7}:
+            return 3  # Back to s3
+        elif dpid in {8, 9}:
+            return 3  # Back to s4
+        elif dpid == 10:
+            return 3  # Back to s5
+        return None
+    
     def _update_topology_on_failure(self, switch_id, port):
         """Update topology when link fails"""
         # Port to neighbor mapping for secondary switches
@@ -254,3 +342,6 @@ class SecondaryController(app_manager.RyuApp):
         if neighbor and self.topology.has_edge(switch_id, neighbor):
             self.topology.remove_edge(switch_id, neighbor)
             self.logger.warning(f"[SECONDARY][TOPOLOGY] Removed link s{switch_id}-s{neighbor}")
+            
+            # Clear all flows to trigger rerouting
+            self._clear_flows_for_rerouting()
