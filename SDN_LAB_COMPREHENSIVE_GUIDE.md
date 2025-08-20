@@ -292,12 +292,85 @@ capture-pane -p | grep "DIJKSTRA"
 
 ## 🔧 Technical Details
 
-### Why Ring Topology Doesn't Cause Broadcast Storm:
+### Switch and Network Configuration for Ring Topology
+
+#### 1. Mininet Switch Configuration
+```python
+# From mininet/ring_topology.py
+net = Mininet(
+    controller=RemoteController,
+    switch=OVSKernelSwitch,      # Open vSwitch kernel module
+    link=TCLink,                  # Traffic Control link for bandwidth/delay
+    autoSetMacs=True              # Automatic MAC address assignment
+)
+
+# Switch creation with explicit DPID
+sw = net.addSwitch(f's{i}', dpid=f'{i:016x}')  # 16-digit hex DPID
+```
+
+**Key Settings:**
+- **OVSKernelSwitch**: Uses Open vSwitch kernel datapath (faster than userspace)
+- **autoSetMacs=True**: Prevents MAC conflicts by auto-assigning sequential MACs
+- **DPID format**: 16-digit hex (e.g., s1 = 0000000000000001)
+- **No explicit OpenFlow version**: Negotiated with controller (defaults to 1.3)
+
+#### 2. Controller Configuration
+```bash
+# Ryu controller startup with LLDP
+ryu-manager --observe-links ryu-controller/main_controller_stp.py
+```
+
+**Important Flags:**
+- **--observe-links**: Enables LLDP for automatic topology discovery
+- Without this flag, the controller cannot detect links between switches
+
+#### 3. Port Assignment Pattern
+```python
+# Ring topology port assignments
+# Port 1: Always reserved for host connection
+net.addLink(host, switch, port1=1, port2=1)
+
+# Ports 2-3: Inter-switch links
+net.addLink(s1, s2, port1=2, port2=3)  # s1:2 <-> s2:3
+net.addLink(s2, s3, port1=2, port2=3)  # s2:2 <-> s3:3
+```
+
+This consistent pattern helps the controller distinguish between host and switch ports.
+
+### Two Controller Versions Available
+
+#### 1. main_controller.py (Basic Version)
+- No STP implementation
+- Simple flooding for broadcasts
+- Works in ring but has broadcast storm risk
+
+#### 2. main_controller_stp.py (Enhanced Version)
+```python
+# Broadcast storm prevention features
+self.broadcast_cache = deque(maxlen=1000)  # Recent broadcast tracking
+self.broadcast_timestamps = {}              # Timeout tracking
+self.blocked_ports = set()                  # STP blocked ports
+```
+
+**STP Implementation:**
+- Maintains broadcast cache to detect duplicate packets
+- Blocks redundant ports to prevent loops
+- 2-second timeout for broadcast entries
+
+### Why Ring Topology Doesn't Cause Broadcast Storm (Without STP):
 
 1. **Flow Tables**: After first broadcast, flows are installed for known destinations
 2. **MAC Learning**: Controller learns host locations from first packet
 3. **Timeout**: Flows expire after 30 seconds to handle topology changes
 4. **LLDP Isolation**: LLDP packets are handled separately and not flooded
+5. **Port-based Learning**: Port 1 is always treated as host port
+
+### With STP Version (main_controller_stp.py):
+
+Additional protections:
+1. **Broadcast Cache**: Detects and drops duplicate broadcasts
+2. **Spanning Tree**: Blocks redundant links to create loop-free topology
+3. **Path Tracking**: Monitors active paths for optimization
 
 ### Dijkstra Algorithm Properties:
 - **Time Complexity**: O((V + E) log V) using NetworkX implementation

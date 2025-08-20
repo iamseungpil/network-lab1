@@ -44,7 +44,7 @@ tmux send-keys -t sdn_demo:0.0 "echo '🎛️  Starting Dijkstra Controller with
 tmux send-keys -t sdn_demo:0.0 "sleep 2" Enter
 
 # Start controller in top pane
-tmux send-keys -t sdn_demo:0.0 "ryu-manager --observe-links ryu-controller/main_controller.py" Enter
+tmux send-keys -t sdn_demo:0.0 "ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
 
 # Configure bottom pane for topology
 tmux select-pane -t sdn_demo:0.1
