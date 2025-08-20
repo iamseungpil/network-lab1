@@ -110,7 +110,19 @@
       "Bash(tmux rename-window:*)",
       "Bash(cp:*)",
       "Bash(tmux split-window:*)",
-      "Bash(./start_sdn_demo.sh:*)"
+      "Bash(./start_sdn_demo.sh:*)",
+      "Bash(./sdn_demo.sh:*)",
+      "Bash(./sdn_ring_demo.sh:*)",
+      "Bash(./sdn_ring_stp_demo.sh:*)",
+      "Bash(echo $TERM)",
+      "Bash(export TERM=xterm)",
+      "Bash(./run_demo.sh:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(infocmp:*)",
+      "Bash(export TERMINFO=/lib/terminfo)",
+      "Bash(git checkout:*)",
+      "Bash(./test_dijkstra_clear.sh:*)"
     ],
     "deny": []
   }

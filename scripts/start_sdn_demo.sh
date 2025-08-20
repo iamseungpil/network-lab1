@@ -53,19 +53,16 @@ tmux send-keys -t sdn_demo:0.1 "echo '⏳ Waiting for controller to start...'" E
 tmux send-keys -t sdn_demo:0.1 "sleep 5" Enter
 
 # Choose topology based on argument
-if [ "$1" = "ring" ]; then
-    TOPOLOGY="mininet/ring_topology.py"
-    echo -e "${GREEN}🌐 Using 10-switch ring topology${NC}"
-elif [ "$1" = "graph" ]; then
-    TOPOLOGY="mininet/graph_topology.py"
-    echo -e "${GREEN}📊 Using graph topology${NC}"
+TOPOLOGY="simple_topology.py"
+if [ "$1" = "10sw" ]; then
+    TOPOLOGY="graph_topology_10sw_20h.py"
+    echo -e "${GREEN}🌐 Using 10-switch topology${NC}"
 else
-    TOPOLOGY="mininet/diamond_topology.py"
     echo -e "${GREEN}💎 Using simple diamond topology${NC}"
 fi
 
 # Start topology in bottom pane
-tmux send-keys -t sdn_demo:0.1 "echo '🌐 Starting topology...'" Enter
+tmux send-keys -t sdn_demo:0.1 "echo '🌐 Starting $TOPOLOGY...'" Enter
 tmux send-keys -t sdn_demo:0.1 "sudo python3 $TOPOLOGY" Enter
 
 # Instructions

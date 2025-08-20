@@ -1,98 +1,104 @@
-# Dual Controller SDN with Link Failure Demo
+# SDN Ring Topology with Dijkstra Routing
 
-Advanced SDN demonstration with dual controllers managing separate network domains, featuring Dijkstra shortest path routing and cross-domain communication with automatic rerouting on link failures.
+## 🚀 Quick Start
 
-## Quick Start
-
-**NEW: Use Conda Environment for Compatibility**
 ```bash
-# Recommended (with conda environment)
-./demo_conda.sh
+# Run complete demo
+./run_demo.sh
 
-# Alternative (if RYU is already installed)
-./demo_all.sh
+# Clean up
+./run_demo.sh --clean
 ```
 
-## File Structure
+## 📋 Features
 
-### Essential Files:
-- `demo_all.sh` - Complete automated dual controller demonstration
-- `start_dual_controllers.sh` - Start primary & secondary controllers
-- `link_failure_test.py` - Cross-domain link failure test script  
-- `ryu-controller/primary_controller.py` - Primary domain controller (s1-s5)
-- `ryu-controller/secondary_controller.py` - Secondary domain controller (s6-s10)
-- `mininet/dijkstra_graph_topo.py` - Dual controller network topology
+- **10-switch ring topology** with STP loop prevention
+- **Dijkstra shortest path** routing with clear logs
+- **Link failure recovery** with automatic rerouting
+- **Packet flooding prevention** (3-layer defense)
+- **Real-time monitoring** via tmux 3-pane layout
 
-### Alternative Demos:
-- `demo_dijkstra.sh` - Interactive demonstration
-- `stop_sdn.sh` - Cleanup script
+## 📁 Project Structure
 
-## What the Demo Shows
-
-1. **Dual Controller Architecture**: Primary (s1-s5) & Secondary (s6-s10) domains
-2. **Cross-Domain Communication**: Gateway-based routing between controller domains
-3. **Dijkstra Routing**: Shortest path calculation within and across domains
-4. **Link Failure Detection**: OpenFlow PORT_STATUS event handling
-5. **Advanced Rerouting**: Intra-domain and cross-domain path recalculation
-6. **Network Recovery**: Optimal path restoration when links recover
-
-## Network Topology
-
-10-switch dual controller topology with cross-domain gateways:
-- **Primary Domain**: s1-s5 managing h1-h10
-- **Secondary Domain**: s6-s10 managing h11-h20
-- **Cross-Domain Links**: s3↔s6, s3↔s7, s4↔s8, s4↔s9, s5↔s10
-- **Total**: 10 switches, 20 hosts with fault-tolerant routing
-
-## Manual Testing
-
-After running the demo, you can test manually:
-```bash
-# In Mininet CLI:
-net.configLinkStatus("s1", "s2", "down")  # Break link
-h1 ping h8                                 # Test connectivity  
-net.configLinkStatus("s1", "s2", "up")    # Restore link
+```
+network-lab1/
+├── run_demo.sh                    # Main demo script (USE THIS!)
+├── ryu-controller/
+│   └── enhanced_controller.py     # Complete SDN controller
+├── mininet/
+│   └── ring_topology.py          # 10-switch ring topology
+├── docs/                         # Documentation
+│   └── IMPLEMENTATION_ANALYSIS.md # Detailed analysis
+└── scripts/                      # Additional scripts
 ```
 
-All unnecessary backup files and duplicate controllers have been removed for simplicity.
+## 🎯 What You'll See
 
-## Installation & Setup
+### Normal Operation
+- STP blocks one link to prevent loops
+- Dijkstra calculates shortest paths
+- Clear path logs: `s1 → s2 → s3 → s4 → s5`
 
-### Method 1: Conda Environment (Recommended)
-```bash
-# Create conda environment with Python 3.8
-conda create -n sdn-env python=3.8 -y
-conda activate sdn-env
-
-# Install compatible versions
-pip install setuptools==57.5.0
-pip install eventlet==0.30.2
-pip install ryu networkx
-
-# Install system dependencies  
-sudo apt-get install mininet openvswitch-switch
-
-# Run demo
-./demo_conda.sh
+### Link Failure
+```
+💥 [LINK FAILURE DETECTED]
+   Failed link: s1:2 ↔ s2:3
+🔄 [RECOVERY] Topology updated, paths will be recalculated
+🧮 [DIJKSTRA] Computing path from s1 to s2
+   ✅ PATH SELECTED: s1 → s10 → s9 → ... → s3 → s2
 ```
 
-### Method 2: System Installation
-```bash
-# Install dependencies
-sudo apt-get install mininet openvswitch-switch python3-pip
-pip3 install ryu
+## 📊 TMux Layout
 
-# May have eventlet compatibility issues with newer Python versions
-
-# Run demo
-./demo_all.sh
+```
+┌────────────────────────────────┐
+│     Controller Logs (60%)      │  ← Watch here!
+├─────────────┬──────────────────┤
+│ Mininet CLI │ Monitor (20%)    │
+└─────────────┴──────────────────┘
 ```
 
-## Environment Details
+## 🔧 Requirements
 
-**Working Configuration:**
-- Python 3.8.20
-- RYU 4.34
-- eventlet 0.30.2  
-- setuptools 57.5.0
+- Ubuntu 22.04
+- Python 3.9 (conda environment: `sdn-lab`)
 - Mininet 2.3.0+
+- Ryu 4.34
+- tmux
+
+## 📚 Documentation
+
+See `docs/IMPLEMENTATION_ANALYSIS.md` for:
+- Detailed implementation analysis
+- STP and flooding prevention mechanisms
+- Complete scenario walkthrough
+- Performance metrics
+
+## 🎮 Manual Testing
+
+After running `./run_demo.sh`, connect to tmux:
+```bash
+tmux attach -t sdn_demo
+```
+
+Test commands in Mininet (Pane 1):
+```
+h1 ping h6          # Test long path
+link s1 s2 down     # Simulate failure
+link s1 s2 up       # Recover link
+pingall             # Test all paths
+```
+
+## 👀 Key Observations
+
+1. **STP in action**: One port blocked at startup
+2. **Path calculation**: Full path shown for each flow
+3. **Link failure**: Immediate detection and rerouting
+4. **No flooding**: Broadcasts controlled by STP
+
+## 📈 Performance
+
+- Link failure detection: < 2 seconds
+- Path recalculation: Immediate
+- STP convergence: ~3 seconds
+- Packet loss: 0% (with buffering)
