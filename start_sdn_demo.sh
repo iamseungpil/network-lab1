@@ -100,9 +100,34 @@ fi
 # Kill existing session if it exists
 echo -e "${YELLOW}🧹 Cleaning up existing sessions...${NC}"
 tmux kill-session -t sdn_demo 2>/dev/null || true
-sudo mn -c 2>/dev/null || true
+
+# More thorough cleanup
+echo -e "${YELLOW}🧹 Killing existing ryu-manager processes...${NC}"
 pkill -f ryu-manager 2>/dev/null || true
-sleep 2
+sudo pkill -f ryu-manager 2>/dev/null || true
+
+echo -e "${YELLOW}🧹 Cleaning mininet...${NC}"
+sudo mn -c 2>/dev/null || true
+
+# Check for ovs-testcontroller conflict
+if ss -tulpn | grep -q :6653; then
+    echo -e "${YELLOW}⚠️  Port 6653 is in use (likely ovs-testcontroller)${NC}"
+    echo -e "${YELLOW}🔧 Using alternative port 6633 for controller...${NC}"
+    CONTROLLER_PORT="6633"
+else
+    CONTROLLER_PORT="6653"
+fi
+
+# Wait longer for cleanup
+sleep 3
+
+# Check if port is still in use and force kill if needed
+if pgrep -f ryu-manager >/dev/null; then
+    echo -e "${YELLOW}🧹 Force killing remaining ryu processes...${NC}"
+    pkill -9 -f ryu-manager 2>/dev/null || true
+    sudo pkill -9 -f ryu-manager 2>/dev/null || true
+    sleep 2
+fi
 
 # Create new tmux session
 echo -e "${YELLOW}📺 Creating tmux session 'sdn_demo'...${NC}"
@@ -118,7 +143,7 @@ tmux send-keys -t sdn_demo:0.0 "echo '🎛️  Starting Dijkstra Controller with
 tmux send-keys -t sdn_demo:0.0 "sleep 2" Enter
 
 # Start controller in top pane (with conda environment)
-tmux send-keys -t sdn_demo:0.0 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
+tmux send-keys -t sdn_demo:0.0 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && ryu-manager --observe-links --ofp-tcp-listen-port $CONTROLLER_PORT ryu-controller/main_controller_stp.py" Enter
 
 # Configure bottom pane for topology
 tmux select-pane -t sdn_demo:0.1
