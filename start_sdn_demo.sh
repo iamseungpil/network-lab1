@@ -23,6 +23,55 @@ if ! command -v tmux &> /dev/null; then
     exit 1
 fi
 
+# Conda environment setup
+echo -e "${YELLOW}🐍 Setting up conda environment...${NC}"
+
+# Initialize conda for this script
+if [ -f "/data/miniforge3/etc/profile.d/conda.sh" ]; then
+    source /data/miniforge3/etc/profile.d/conda.sh
+elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source $HOME/miniconda3/etc/profile.d/conda.sh
+elif [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
+    source /opt/conda/etc/profile.d/conda.sh
+else
+    echo -e "${RED}Error: Conda not found! Please install conda first${NC}"
+    exit 1
+fi
+
+# Check if sdn-lab environment exists
+ENV_NAME="sdn-lab"
+if conda env list | grep -q "^${ENV_NAME} "; then
+    echo -e "${GREEN}✅ Conda environment '${ENV_NAME}' already exists${NC}"
+else
+    echo -e "${YELLOW}🔧 Creating conda environment '${ENV_NAME}'...${NC}"
+    conda create -n ${ENV_NAME} python=3.10 -y
+    echo -e "${GREEN}✅ Environment '${ENV_NAME}' created${NC}"
+fi
+
+# Activate environment
+echo -e "${YELLOW}🔄 Activating conda environment '${ENV_NAME}'...${NC}"
+conda activate ${ENV_NAME}
+
+# Check and install requirements
+if [ -f "requirements.txt" ]; then
+    echo -e "${YELLOW}📦 Installing/updating requirements...${NC}"
+    pip install -r requirements.txt
+    echo -e "${GREEN}✅ Requirements installed${NC}"
+else
+    echo -e "${YELLOW}⚠️  No requirements.txt found, installing basic packages...${NC}"
+    pip install ryu networkx
+    echo -e "${GREEN}✅ Basic packages installed${NC}"
+fi
+
+# Verify installation
+echo -e "${YELLOW}🔍 Verifying installation...${NC}"
+if python -c "import ryu, networkx; print('✅ All packages available')" 2>/dev/null; then
+    echo -e "${GREEN}✅ Environment setup complete!${NC}"
+else
+    echo -e "${RED}❌ Package verification failed${NC}"
+    exit 1
+fi
+
 # Kill existing session if it exists
 echo -e "${YELLOW}🧹 Cleaning up existing sessions...${NC}"
 tmux kill-session -t sdn_demo 2>/dev/null || true
@@ -43,8 +92,8 @@ tmux send-keys -t sdn_demo:0.0 "echo '=== CONTROLLER WINDOW (상단) ==='" Enter
 tmux send-keys -t sdn_demo:0.0 "echo '🎛️  Starting Dijkstra Controller with detailed logging...'" Enter
 tmux send-keys -t sdn_demo:0.0 "sleep 2" Enter
 
-# Start controller in top pane
-tmux send-keys -t sdn_demo:0.0 "ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
+# Start controller in top pane (with conda environment)
+tmux send-keys -t sdn_demo:0.0 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-lab && ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
 
 # Configure bottom pane for topology
 tmux select-pane -t sdn_demo:0.1
@@ -64,9 +113,9 @@ else
     echo -e "${GREEN}💎 Using simple diamond topology${NC}"
 fi
 
-# Start topology in bottom pane
+# Start topology in bottom pane (with conda environment)
 tmux send-keys -t sdn_demo:0.1 "echo '🌐 Starting topology...'" Enter
-tmux send-keys -t sdn_demo:0.1 "sudo python3 $TOPOLOGY" Enter
+tmux send-keys -t sdn_demo:0.1 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-lab && sudo -E python3 $TOPOLOGY" Enter
 
 # Instructions
 echo -e "${GREEN}✅ SDN Demo started successfully!${NC}"
