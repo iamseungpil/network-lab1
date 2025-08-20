@@ -94,6 +94,9 @@ class MainDijkstraControllerSTP(app_manager.RyuApp):
                     print(f"🚫 [STP] Blocking port {port} on s{dst_dpid} to prevent loop")
             
             print(f"🌳 [STP] Spanning tree computed: {len(tree_edges)} active links, {len(self.blocked_ports)} blocked ports")
+            if self.blocked_ports:
+                blocked_list = [f"s{dpid}:{port}" for dpid, port in sorted(self.blocked_ports)]
+                print(f"   └── Blocked ports: {', '.join(blocked_list)}")
             
         except Exception as e:
             print(f"⚠️ [STP] Error computing spanning tree: {e}")
@@ -279,17 +282,19 @@ class MainDijkstraControllerSTP(app_manager.RyuApp):
         in_port = msg.match['in_port']
         dpid = datapath.id
         
-        # Check if port is blocked by STP
-        if (dpid, in_port) in self.blocked_ports:
-            print(f"🚫 [STP] Dropped packet on blocked port s{dpid}:{in_port}")
-            return
-        
-        # Parse packet
+        # Parse packet first to check type
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
         
-        # Skip LLDP and IPv6
+        # Skip LLDP and IPv6 silently (even on blocked ports)
         if eth.ethertype == ether_types.ETH_TYPE_LLDP or eth.ethertype == 0x86dd:
+            return
+        
+        # Check if port is blocked by STP (only log for non-LLDP packets)
+        if (dpid, in_port) in self.blocked_ports:
+            # Only log occasionally to reduce spam
+            if self.packet_count % 100 == 0:  # Log every 100th blocked packet
+                print(f"🚫 [STP] Dropped packets on blocked port s{dpid}:{in_port} (suppressing logs)")
             return
         
         src_mac = eth.src
