@@ -26,15 +26,40 @@ fi
 # Conda environment setup
 echo -e "${YELLOW}🐍 Setting up conda environment...${NC}"
 
-# Initialize conda for this script
-if [ -f "/data/miniforge3/etc/profile.d/conda.sh" ]; then
-    source /data/miniforge3/etc/profile.d/conda.sh
-elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-    source $HOME/miniconda3/etc/profile.d/conda.sh
-elif [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
-    source /opt/conda/etc/profile.d/conda.sh
+# Initialize conda for this script - dynamic detection
+CONDA_BASE=""
+
+# Method 1: Use conda info if conda is already in PATH
+if command -v conda &> /dev/null; then
+    CONDA_BASE=$(conda info --base 2>/dev/null)
+fi
+
+# Method 2: Check CONDA_PREFIX if we're in a conda environment
+if [ -z "$CONDA_BASE" ] && [ -n "$CONDA_PREFIX" ]; then
+    # Extract base path from CONDA_PREFIX (remove /envs/env_name part)
+    CONDA_BASE=$(echo "$CONDA_PREFIX" | sed 's|/envs/.*||')
+fi
+
+# Method 3: Search common conda installation locations
+if [ -z "$CONDA_BASE" ]; then
+    for path in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "/opt/miniconda3" "/opt/anaconda3" "/opt/miniforge3" "/data/miniforge3" "/usr/local/miniconda3" "/usr/local/anaconda3"; do
+        if [ -f "$path/etc/profile.d/conda.sh" ]; then
+            CONDA_BASE="$path"
+            break
+        fi
+    done
+fi
+
+# Try to source conda.sh if we found a conda installation
+if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+    source "$CONDA_BASE/etc/profile.d/conda.sh"
+    echo -e "${GREEN}✅ Found conda at: $CONDA_BASE${NC}"
 else
     echo -e "${RED}Error: Conda not found! Please install conda first${NC}"
+    echo -e "${YELLOW}Searched locations:${NC}"
+    echo -e "  - conda command in PATH"
+    echo -e "  - CONDA_PREFIX environment variable"
+    echo -e "  - Common installation paths (\$HOME/miniconda3, \$HOME/anaconda3, etc.)"
     exit 1
 fi
 
@@ -93,7 +118,7 @@ tmux send-keys -t sdn_demo:0.0 "echo '🎛️  Starting Dijkstra Controller with
 tmux send-keys -t sdn_demo:0.0 "sleep 2" Enter
 
 # Start controller in top pane (with conda environment)
-tmux send-keys -t sdn_demo:0.0 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-lab && ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
+tmux send-keys -t sdn_demo:0.0 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && ryu-manager --observe-links ryu-controller/main_controller_stp.py" Enter
 
 # Configure bottom pane for topology
 tmux select-pane -t sdn_demo:0.1
@@ -115,7 +140,7 @@ fi
 
 # Start topology in bottom pane (with conda environment)
 tmux send-keys -t sdn_demo:0.1 "echo '🌐 Starting topology...'" Enter
-tmux send-keys -t sdn_demo:0.1 "source /data/miniforge3/etc/profile.d/conda.sh && conda activate sdn-lab && sudo -E python3 $TOPOLOGY" Enter
+tmux send-keys -t sdn_demo:0.1 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && sudo -E python3 $TOPOLOGY" Enter
 
 # Instructions
 echo -e "${GREEN}✅ SDN Demo started successfully!${NC}"
