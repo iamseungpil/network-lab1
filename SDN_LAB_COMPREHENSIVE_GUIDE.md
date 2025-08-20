@@ -292,6 +292,110 @@ capture-pane -p | grep "DIJKSTRA"
 
 ## 🔧 Technical Details
 
+### LLDP (Link Layer Discovery Protocol)
+
+#### What is LLDP?
+LLDP is a vendor-neutral Layer 2 protocol used by network devices to advertise their identity, capabilities, and neighbors. In SDN:
+
+1. **Purpose**: Automatic topology discovery
+2. **How it works**:
+   - Controller sends LLDP packets through each switch port
+   - When a switch receives LLDP, it sends to controller via PACKET_IN
+   - Controller maps which ports connect to which switches
+3. **Implementation in our code**:
+```python
+# Enable LLDP with ryu-manager flag
+ryu-manager --observe-links controller.py
+
+# Controller uses ryu.topology API
+from ryu.topology.api import get_switch, get_link
+links = get_link(self, None)  # Discovers all links
+```
+
+4. **LLDP packet flow**:
+```
+Controller → Switch1:Port2 → [LLDP Packet] → Switch2:Port3 → Controller
+           Creates link: (Switch1:Port2 ↔ Switch2:Port3)
+```
+
+### STP (Spanning Tree Protocol)
+
+#### What is STP?
+STP prevents Layer 2 loops by creating a loop-free logical topology. Essential for ring topologies.
+
+#### Why Ring Topology Needs STP:
+Without STP in a ring:
+```
+Broadcast from h1 → s1 → s2 → s3 → ... → s10 → s1 → s2 → ... (infinite loop)
+```
+
+#### How STP Works:
+
+1. **Root Bridge Election**: Lowest switch ID becomes root (usually s1)
+
+2. **Tree Construction**:
+```python
+# From main_controller_stp.py
+def compute_spanning_tree(self):
+    if nx.is_connected(self.topology_graph):
+        # Create minimum spanning tree
+        tree = nx.minimum_spanning_tree(self.topology_graph)
+        
+        # Block redundant links
+        all_edges = set(self.topology_graph.edges())
+        tree_edges = set(tree.edges()) 
+        
+        for edge in all_edges - tree_edges:
+            # This edge creates a loop - block it
+            self.blocked_ports.add((switch, port))
+```
+
+3. **Port States**:
+   - **Forwarding**: Normal packet forwarding (tree edges)
+   - **Blocked**: Drops all packets except BPDU (non-tree edges)
+
+4. **Example in 10-switch ring**:
+```
+Original Ring:
+s1 -- s2 -- s3 -- s4 -- s5
+|                         |
+s10 - s9 -- s8 -- s7 -- s6
+
+After STP (s10→s1 link blocked):
+s1 -- s2 -- s3 -- s4 -- s5
+                          |
+s10 - s9 -- s8 -- s7 -- s6
+```
+
+#### Our STP Implementation:
+
+**main_controller.py** (No STP):
+- Simple flooding for broadcasts
+- Risk of broadcast storms in loops
+- Works due to MAC learning and flow timeouts
+
+**main_controller_stp.py** (With STP):
+```python
+# Three protection mechanisms:
+1. Port Blocking:
+   self.blocked_ports = set()  # Blocks redundant links
+
+2. Broadcast Cache:
+   self.broadcast_cache = deque(maxlen=1000)
+   # Prevents duplicate broadcasts
+
+3. Storm Detection:
+   if self.is_broadcast_duplicate(dpid, in_port, src_mac, dst_mac):
+       print("🛑 [STORM] Dropped duplicate broadcast")
+       return
+```
+
+#### Benefits of STP Version:
+1. **Loop Prevention**: Blocks redundant paths
+2. **Broadcast Control**: No infinite flooding
+3. **Failover Ready**: Blocked links can activate if primary fails
+4. **Network Stability**: Prevents CPU/bandwidth exhaustion
+
 ### Switch and Network Configuration for Ring Topology
 
 #### 1. Mininet Switch Configuration

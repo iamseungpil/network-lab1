@@ -301,6 +301,9 @@ class MainDijkstraControllerSTP(app_manager.RyuApp):
         dst_mac = eth.dst
         self.packet_count += 1
         
+        print(f"\n📦 [PACKET #{self.packet_count}] Received on s{dpid}:{in_port}")
+        print(f"   └── SRC: {src_mac} → DST: {dst_mac}")
+        
         # Learn host location
         self.learn_host_location(dpid, src_mac, in_port)
         
@@ -308,15 +311,12 @@ class MainDijkstraControllerSTP(app_manager.RyuApp):
         if self.is_broadcast_multicast(dst_mac):
             # Check for duplicate broadcast
             if self.is_broadcast_duplicate(dpid, in_port, src_mac, dst_mac):
-                print(f"🛑 [STORM] Dropped duplicate broadcast from {src_mac} on s{dpid}:{in_port}")
+                print(f"   └── 🛑 [STORM] Dropped duplicate broadcast")
                 return
             
-            print(f"📦 [PACKET #{self.packet_count}] Broadcast on s{dpid}:{in_port}")
+            print(f"   └── 📡 Broadcast/Multicast: flooding packet (STP-filtered)")
             self.flood_packet_stp(datapath, msg, in_port)
             return
-        
-        # Unicast handling
-        print(f"\n📦 [PACKET #{self.packet_count}] Unicast {src_mac} → {dst_mac} on s{dpid}:{in_port}")
         
         # Find destination
         if dst_mac in self.host_locations:
@@ -347,14 +347,12 @@ class MainDijkstraControllerSTP(app_manager.RyuApp):
                 path_changed = self.track_path_change(src_mac, dst_mac, path)
                 
                 path_str = " → ".join([f"s{s}" for s in path])
+                print(f"   └── 🛤️  Using DIJKSTRA PATH: {path_str}")
+                print(f"   └── 🎯 Next hop: s{next_hop} via port {out_port}")
+                print(f"   └── 📊 Path length: {len(path)-1} hops")
                 
                 if path_changed:
-                    print(f"   └── 🔄 PATH CHANGED! New route: {path_str}")
-                else:
-                    print(f"   └── 🛤️  Using path: {path_str}")
-                
-                print(f"   └── 📍 Distance: {len(path)-1} hops")
-                print(f"   └── ➡️  Next hop: s{next_hop} via port {out_port}")
+                    print(f"   └── 🔄 PATH CHANGED from previous route")
                 
                 # Install flow for efficiency
                 self.install_path_flow(datapath, src_mac, dst_mac, out_port)
