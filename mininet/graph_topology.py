@@ -5,6 +5,8 @@ Creates a mesh-like graph topology with multiple redundant paths
 Each switch connects to 2 hosts and multiple other switches
 """
 
+import sys
+import argparse
 from mininet.net import Mininet
 from mininet.node import RemoteController, OVSKernelSwitch
 from mininet.cli import CLI
@@ -13,7 +15,7 @@ from mininet.log import setLogLevel, info
 # import networkx as nx  # Not needed for this topology
 import random
 
-def create_graph_topology():
+def create_graph_topology(controller_port=6633):
     """Create a complex graph topology with 10 switches and 20 hosts"""
     
     net = Mininet(
@@ -30,7 +32,7 @@ def create_graph_topology():
         'c0',
         controller=RemoteController,
         ip='127.0.0.1',
-        port=6633
+        port=controller_port
     )
     
     # Add 10 switches
@@ -193,14 +195,20 @@ def test_link_failure(net, hosts, switches):
 
 def run_graph_topology():
     """Main function to run the graph topology"""
+    parser = argparse.ArgumentParser(description='Graph topology with configurable controller port')
+    parser.add_argument('--controller-port', type=int, default=6633, 
+                       help='Controller port (default: 6633)')
+    args = parser.parse_args()
+    
     setLogLevel('info')
     
     info("\n" + "="*80 + "\n")
     info("🌐 GRAPH TOPOLOGY TEST: 10 SWITCHES, 20 HOSTS\n")
+    info(f"📡 Controller port: {args.controller_port}\n")
     info("="*80 + "\n")
     
     # Create topology
-    net, hosts, switches = create_graph_topology()
+    net, hosts, switches = create_graph_topology(controller_port=args.controller_port)
     
     # Start network
     info("\n*** Starting network\n")

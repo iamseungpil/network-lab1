@@ -3,13 +3,15 @@
 Simple 4-switch diamond topology for testing
 """
 
+import sys
+import argparse
 from mininet.net import Mininet
 from mininet.node import RemoteController, OVSKernelSwitch
 from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.log import setLogLevel, info
 
-def create_diamond_topology():
+def create_diamond_topology(controller_port=6633):
     """Create simple 4-switch diamond topology"""
     
     net = Mininet(
@@ -22,7 +24,7 @@ def create_diamond_topology():
     info("*** Creating Diamond Topology: 4 switches, 4 hosts\n")
     
     # Add controller
-    c0 = net.addController('c0', controller=RemoteController, ip='127.0.0.1', port=6633)
+    c0 = net.addController('c0', controller=RemoteController, ip='127.0.0.1', port=controller_port)
     
     # Add switches
     s1 = net.addSwitch('s1', dpid='0000000000000001')
@@ -59,11 +61,17 @@ def create_diamond_topology():
     return net
 
 def main():
+    parser = argparse.ArgumentParser(description='Diamond topology with configurable controller port')
+    parser.add_argument('--controller-port', type=int, default=6633, 
+                       help='Controller port (default: 6633)')
+    args = parser.parse_args()
+    
     setLogLevel('info')
     
     info("*** Starting Simple Diamond Topology\n")
+    info(f"*** Controller port: {args.controller_port}\n")
     
-    net = create_diamond_topology()
+    net = create_diamond_topology(controller_port=args.controller_port)
     
     info("*** Starting network\n")
     net.start()

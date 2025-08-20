@@ -165,7 +165,7 @@ fi
 
 # Start topology in bottom pane (with conda environment)
 tmux send-keys -t sdn_demo:0.1 "echo '🌐 Starting topology...'" Enter
-tmux send-keys -t sdn_demo:0.1 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && sudo -E python3 $TOPOLOGY" Enter
+tmux send-keys -t sdn_demo:0.1 "source $CONDA_BASE/etc/profile.d/conda.sh && conda activate sdn-lab && sudo -E python3 $TOPOLOGY --controller-port $CONTROLLER_PORT" Enter
 
 # Instructions
 echo -e "${GREEN}✅ SDN Demo started successfully!${NC}"

@@ -5,13 +5,15 @@ Each switch has 1 host connected
 Clean and simple for testing
 """
 
+import sys
+import argparse
 from mininet.net import Mininet
 from mininet.node import RemoteController, OVSKernelSwitch
 from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.log import setLogLevel, info
 
-def create_ring_topology():
+def create_ring_topology(controller_port=6633):
     """Create a simple ring topology with 10 switches"""
     
     net = Mininet(
@@ -29,7 +31,7 @@ def create_ring_topology():
         'c0',
         controller=RemoteController,
         ip='127.0.0.1',
-        port=6633
+        port=controller_port
     )
     
     # Add 10 switches
@@ -112,14 +114,20 @@ def test_ring_connectivity(net, hosts):
         info("    ❌ Far: Failed\n")
 
 def main():
+    parser = argparse.ArgumentParser(description='Ring topology with configurable controller port')
+    parser.add_argument('--controller-port', type=int, default=6633, 
+                       help='Controller port (default: 6633)')
+    args = parser.parse_args()
+    
     setLogLevel('info')
     
     info("\n" + "="*80 + "\n")
     info("🔄 RING TOPOLOGY: 10 SWITCHES\n")
+    info(f"📡 Controller port: {args.controller_port}\n")
     info("="*80 + "\n")
     
     # Create topology
-    net, hosts, switches = create_ring_topology()
+    net, hosts, switches = create_ring_topology(controller_port=args.controller_port)
     
     # Start network
     info("\n*** Starting network\n")
