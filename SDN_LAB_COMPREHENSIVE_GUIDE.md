@@ -1,515 +1,399 @@
-# SDN Lab - Comprehensive Implementation Guide
+# SDN Lab - Complete Technical Guide
+
+## 📚 Table of Contents
+1. [Overview](#-overview)
+2. [Quick Start](#-quick-start)
+3. [Core Concepts](#-core-concepts)
+   - [OpenFlow vs LLDP](#openflow-vs-lldp)
+   - [How They Work Together](#how-they-work-together)
+4. [Implementation Details](#-implementation-details)
+   - [Dijkstra Routing](#dijkstra-routing)
+   - [Link Failure & Rerouting](#link-failure--rerouting)
+   - [STP for Loop Prevention](#stp-for-loop-prevention)
+5. [Configuration](#-configuration)
+6. [Testing & Monitoring](#-testing--monitoring)
+7. [Troubleshooting](#-troubleshooting)
+
+---
 
 ## 🎯 Overview
-This SDN implementation demonstrates Dijkstra shortest-path routing with automatic rerouting capabilities on link failures in a ring topology using Ryu controller and Mininet.
 
-## 📁 Project Structure (Cleaned)
+This SDN implementation demonstrates:
+- **Dijkstra shortest-path routing** with NetworkX
+- **Automatic rerouting** on link failures  
+- **10-switch ring topology** with loop prevention
+- **Real-time topology discovery** using LLDP
+
+### Project Structure
 ```
 network-lab1/
 ├── start_sdn_demo.sh         # Main execution script
-├── demo_dijkstra_routing.sh  # Automated demo script
+├── demo_dijkstra_routing.sh  # Automated demo
 ├── ryu-controller/
-│   ├── main_controller.py    # Dijkstra routing controller
-│   └── main_controller_stp.py # STP-enabled version
-├── mininet/
-│   ├── ring_topology.py      # 10-switch ring topology
-│   ├── diamond_topology.py   # 4-switch diamond topology
-│   └── graph_topology.py     # Complex graph topology
-├── docs/                      # Documentation
-└── backup_all/               # Archived files
+│   ├── main_controller.py    # Basic Dijkstra controller
+│   └── main_controller_stp.py # With STP protection
+└── mininet/
+    ├── ring_topology.py      # 10-switch ring
+    ├── diamond_topology.py   # 4-switch diamond
+    └── graph_topology.py     # Complex graph
 ```
 
-## 🔄 How Rerouting Works - Code Implementation
-
-### 1. Link Failure Detection
-
-The controller detects link failures through OpenFlow port status events:
-
-```python
-@set_ev_cls(event.EventPortModify, MAIN_DISPATCHER)
-def port_modify_handler(self, ev):
-    port = ev.port
-    dpid = port.dpid
-    port_no = port.ofp_port.port_no
-    
-    if port.is_down():
-        print(f"🔴 [PORT EVENT] Port {port_no} LINK_DOWN on s{dpid}")
-        # Topology will be updated on next LLDP discovery cycle
-```
-
-### 2. Topology Discovery and Update
-
-The controller continuously discovers topology using LLDP packets:
-
-```python
-def discover_topology(self):
-    """Discover and update network topology"""
-    switch_list = get_switch(self.switches_context, None)
-    links_list = get_link(self.switches_context, None)
-    
-    # Rebuild topology graph
-    self.topology_graph.clear()
-    self.switch_to_port.clear()
-    
-    for dpid in switches:
-        self.topology_graph.add_node(dpid)
-    
-    for link in links_list:
-        src_dpid = link.src.dpid
-        dst_dpid = link.dst.dpid
-        src_port = link.src.port_no
-        dst_port = link.dst.port_no
-        
-        # Add bidirectional edges
-        if not self.topology_graph.has_edge(src_dpid, dst_dpid):
-            self.topology_graph.add_edge(src_dpid, dst_dpid, weight=1)
-            self.switch_to_port[src_dpid][dst_dpid] = src_port
-            self.switch_to_port[dst_dpid][src_dpid] = dst_port
-```
-
-### 3. Dijkstra Path Calculation
-
-When a packet needs routing, the controller calculates the shortest path:
-
-```python
-def calculate_shortest_path(self, src_dpid, dst_dpid):
-    """Calculate shortest path using Dijkstra algorithm"""
-    if src_dpid == dst_dpid:
-        return [src_dpid]
-    
-    try:
-        # Use NetworkX to calculate shortest path
-        path = nx.shortest_path(
-            self.topology_graph, 
-            src_dpid, 
-            dst_dpid, 
-            weight='weight'
-        )
-        
-        # Log the calculated path
-        if len(path) > 2:  # Multi-hop paths
-            path_str = " → ".join([f"s{s}" for s in path])
-            print(f"   └── 🛤️  DIJKSTRA PATH CALCULATED: {path_str}")
-            
-        return path
-        
-    except nx.NetworkXNoPath:
-        print(f"   └── ❌ NO PATH exists from s{src_dpid} to s{dst_dpid}")
-        return None
-```
-
-### 4. Packet Forwarding with Rerouting
-
-The packet handler implements the routing logic:
-
-```python
-@set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
-def packet_in_handler(self, ev):
-    msg = ev.msg
-    datapath = msg.datapath
-    dpid = datapath.id
-    in_port = msg.match['in_port']
-    
-    # Parse packet
-    pkt = packet.Packet(msg.data)
-    eth = pkt.get_protocols(ethernet.ethernet)[0]
-    src_mac = eth.src
-    dst_mac = eth.dst
-    
-    # Learn host location
-    self.learn_host_location(dpid, src_mac, in_port)
-    
-    # Find destination
-    if dst_mac in self.host_locations:
-        dst_dpid, dst_port = self.host_locations[dst_mac]
-        
-        if dpid == dst_dpid:
-            # Same switch - direct forwarding
-            out_port = dst_port
-            print(f"   └── 🎯 Same switch routing: port {out_port}")
-        else:
-            # Different switch - calculate path using Dijkstra
-            path = self.calculate_shortest_path(dpid, dst_dpid)
-            
-            if not path or len(path) < 2:
-                print(f"   └── ❌ No path found")
-                return
-            
-            # Get next hop
-            next_hop = path[1]
-            out_port = self.switch_to_port[dpid].get(next_hop)
-            
-            path_str = " → ".join([f"s{s}" for s in path])
-            print(f"   └── 🛤️  Using DIJKSTRA PATH: {path_str}")
-            print(f"   └── 🎯 Next hop: s{next_hop} via port {out_port}")
-            
-            # Install flow for efficiency
-            self.install_path_flow(datapath, src_mac, dst_mac, out_port)
-        
-        # Forward packet
-        self.forward_packet(datapath, msg, out_port, in_port)
-```
-
-## 🔄 Ring Topology Loop Prevention
-
-### Problem: Broadcast Storm in Ring
-In a ring topology, broadcast packets can loop infinitely without proper handling.
-
-### Solution Implemented:
-
-#### 1. Smart Host Learning
-```python
-def learn_host_location(self, dpid, mac, port):
-    """Learn host location with port validation"""
-    # Port 1 is always for hosts in our topologies
-    inter_switch_ports = self.switch_to_port.get(dpid, {}).values()
-    is_likely_host_port = port == 1 or port not in inter_switch_ports
-    
-    # Only learn if it's a host port
-    if mac not in self.host_locations:
-        if is_likely_host_port or port == 1:
-            self.host_locations[mac] = (dpid, port)
-            print(f"🖥️  [HOST] Learned {mac} at s{dpid}:{port}")
-```
-
-#### 2. Controlled Flooding
-```python
-def flood_packet(self, datapath, msg, in_port):
-    """Flood packet with loop prevention"""
-    dpid = datapath.id
-    out_ports = []
-    
-    # Get all ports except input port
-    for port_no in datapath.ports:
-        if (port_no != in_port and 
-            port_no != ofproto.OFPP_LOCAL and
-            port_no < ofproto.OFPP_MAX):
-            out_ports.append(port_no)
-    
-    # Log flooding for debugging
-    print(f"   └── 📡 Flooding to ports: {out_ports}")
-    
-    # Forward to all ports
-    actions = [parser.OFPActionOutput(port) for port in out_ports]
-    # ... send packet out ...
-```
-
-#### 3. Flow Installation to Reduce Flooding
-```python
-def install_path_flow(self, datapath, src_mac, dst_mac, out_port):
-    """Install flow entry to avoid repeated flooding"""
-    parser = datapath.ofproto_parser
-    match = parser.OFPMatch(eth_dst=dst_mac, eth_src=src_mac)
-    actions = [parser.OFPActionOutput(out_port)]
-    
-    # Add flow with timeout to handle topology changes
-    self.add_flow(datapath, 10, match, actions, "PATH_FLOW", timeout=30)
-```
-
-## 🔍 Rerouting Example: Link Failure Scenario
-
-### Scenario: Link s1-s2 fails in ring topology
-
-#### Before Failure (h1 → h2):
-```
-Path: h1 → s1 → s2 → h2 (1 hop)
-```
-
-#### After Link Failure:
-```python
-# 1. Link failure detected
-🔴 [PORT EVENT] Port 2 LINK_DOWN on s1
-🔴 [PORT EVENT] Port 3 LINK_DOWN on s2
-
-# 2. Topology updated (s1-s2 edge removed from graph)
-📊 [TOPOLOGY] Network Status:
-   └── Switches: 10 active
-   └── Links: 18 discovered (was 20)
-
-# 3. Next packet triggers new path calculation
-📦 [PACKET] h1 → h2
-   └── 🛤️  DIJKSTRA PATH CALCULATED: s1 → s10 → s9 → s8 → s7 → s6 → s5 → s4 → s3 → s2
-   └── 🎯 Next hop: s10 via port 3
-   └── 📊 Path length: 9 hops
-
-# 4. Traffic flows through alternative path
-✅ Packet forwarded via port 3
-```
+---
 
 ## 🚀 Quick Start
 
-### 1. Start with Ring Topology
+### Basic Commands
 ```bash
+# Start with ring topology (10 switches)
 ./start_sdn_demo.sh ring
-```
 
-### 2. Test Normal Routing
-```bash
-# In Mininet CLI
-h1 ping h2  # Adjacent hosts
-h1 ping h6  # Opposite side of ring
-```
-
-### 3. Test Link Failure
-```bash
-# Break link
-link s1 s2 down
-
-# Test rerouting
-h1 ping h2  # Will use s1→s10→s9→...→s2
-
-# Restore link
-link s1 s2 up
-```
-
-### 4. Run Automated Demo
-```bash
+# Run automated demo
 ./demo_dijkstra_routing.sh
+
+# In Mininet CLI
+h1 ping h6           # Test connectivity
+link s1 s2 down      # Simulate failure
+h1 ping h2           # Test rerouting
 ```
 
-## 📊 Monitoring Dijkstra Routing
-
-### Key Log Messages to Watch:
+### What You'll See
 ```
-🛤️  [DIJKSTRA] Computing shortest path
-🛤️  DIJKSTRA PATH CALCULATED: s1 → s2 → s3
-🛤️  Using DIJKSTRA PATH: s1 → s10 → s9 → s8
-🎯 Next hop: s10 via port 3
-📊 Path length: 9 hops
-🔴 [PORT EVENT] Port 2 LINK_DOWN
-✅ Packet forwarded via port 3
+📦 [PACKET #1] Received on s1:1
+   └── SRC: 00:00:00:00:00:01 → DST: 00:00:00:00:00:06
+   └── 🛤️  Using DIJKSTRA PATH: s1 → s2 → s3 → s4 → s5 → s6
+   └── 🎯 Next hop: s2 via port 2
+   └── 📊 Path length: 5 hops
 ```
 
-### Check Controller Logs:
+---
+
+## 🔍 Core Concepts
+
+### OpenFlow vs LLDP
+
+These are **completely different protocols** working together:
+
+| Aspect | OpenFlow | LLDP |
+|--------|----------|------|
+| **Purpose** | Control switches | Discover topology |
+| **Layer** | L4 (TCP 6633/6653) | L2 (Ethernet 0x88cc) |
+| **Direction** | Bidirectional | Unidirectional |
+| **Messages** | FLOW_MOD, PACKET_IN/OUT | Advertisement only |
+
+### How They Work Together
+
+#### 1️⃣ **Startup Phase**
 ```bash
-# Attach to tmux session
-tmux attach -t sdn_demo
-
-# Filter for Dijkstra events
-Ctrl+B, then :
-capture-pane -p | grep "DIJKSTRA"
-```
-
-## 🔧 Technical Details
-
-### LLDP (Link Layer Discovery Protocol)
-
-#### What is LLDP?
-LLDP is a vendor-neutral Layer 2 protocol used by network devices to advertise their identity, capabilities, and neighbors. In SDN:
-
-1. **Purpose**: Automatic topology discovery
-2. **How it works**:
-   - Controller sends LLDP packets through each switch port
-   - When a switch receives LLDP, it sends to controller via PACKET_IN
-   - Controller maps which ports connect to which switches
-3. **Implementation in our code**:
-```python
-# Enable LLDP with ryu-manager flag
 ryu-manager --observe-links controller.py
-
-# Controller uses ryu.topology API
-from ryu.topology.api import get_switch, get_link
-links = get_link(self, None)  # Discovers all links
+            ↑                    ↑
+        Enable LLDP        OpenFlow controller
 ```
 
-4. **LLDP packet flow**:
+#### 2️⃣ **LLDP: Building the Map**
 ```
-Controller → Switch1:Port2 → [LLDP Packet] → Switch2:Port3 → Controller
-           Creates link: (Switch1:Port2 ↔ Switch2:Port3)
-```
-
-### STP (Spanning Tree Protocol)
-
-#### What is STP?
-STP prevents Layer 2 loops by creating a loop-free logical topology. Essential for ring topologies.
-
-#### Why Ring Topology Needs STP:
-Without STP in a ring:
-```
-Broadcast from h1 → s1 → s2 → s3 → ... → s10 → s1 → s2 → ... (infinite loop)
+Every 5 seconds:
+s1:port2 → [LLDP packet] → s2:port3 → PACKET_IN → Controller
+                                            ↓
+                              "Link discovered: s1:2 ↔ s2:3"
 ```
 
-#### How STP Works:
+LLDP discovers the network structure automatically:
+- Sends probe packets through all ports
+- Learns which switches are connected
+- Updates topology graph in controller
 
-1. **Root Bridge Election**: Lowest switch ID becomes root (usually s1)
-
-2. **Tree Construction**:
+#### 3️⃣ **OpenFlow: Controlling Traffic**
 ```python
-# From main_controller_stp.py
-def compute_spanning_tree(self):
-    if nx.is_connected(self.topology_graph):
-        # Create minimum spanning tree
-        tree = nx.minimum_spanning_tree(self.topology_graph)
-        
-        # Block redundant links
-        all_edges = set(self.topology_graph.edges())
-        tree_edges = set(tree.edges()) 
-        
-        for edge in all_edges - tree_edges:
-            # This edge creates a loop - block it
-            self.blocked_ports.add((switch, port))
+# When h1 pings h6:
+1. s1 → Controller: "Unknown packet!" (PACKET_IN)
+2. Controller: "Let me check LLDP topology..."
+3. Controller: "Path is s1→s2→s3→s4→s5→s6"
+4. Controller → s1: "Send to port 2" (FLOW_MOD)
 ```
 
-3. **Port States**:
-   - **Forwarding**: Normal packet forwarding (tree edges)
-   - **Blocked**: Drops all packets except BPDU (non-tree edges)
+#### 4️⃣ **Working Example**
+```
+Time 0s: Controller starts
+├─ OpenFlow: Switches connect (s1...s10)
+└─ LLDP: Start topology discovery
 
-4. **Example in 10-switch ring**:
+Time 5s: Topology ready
+├─ LLDP: "Found 20 links (10 physical × 2 directions)"
+└─ Controller: Builds NetworkX graph
+
+Time 10s: h1 pings h6
+├─ OpenFlow: s1 sends PACKET_IN
+├─ Controller: Uses LLDP topology for Dijkstra
+├─ OpenFlow: Installs flows with FLOW_MOD
+└─ Result: Ping success!
+
+Time 15s: Link s1-s2 fails
+├─ OpenFlow: PORT_STATUS event (immediate)
+├─ LLDP: Removes link from topology
+├─ Next packet: Rerouted via s1→s10→s9→...→s2
+```
+
+---
+
+## 💻 Implementation Details
+
+### Dijkstra Routing
+
+#### Path Calculation
+```python
+def calculate_shortest_path(self, src_dpid, dst_dpid):
+    """Uses NetworkX with LLDP-discovered topology"""
+    try:
+        # NetworkX Dijkstra on LLDP topology
+        path = nx.shortest_path(
+            self.topology_graph,  # Built from LLDP
+            src_dpid, 
+            dst_dpid,
+            weight='weight'
+        )
+        
+        path_str = " → ".join([f"s{s}" for s in path])
+        print(f"   └── 🛤️  DIJKSTRA PATH: {path_str}")
+        return path
+        
+    except nx.NetworkXNoPath:
+        print(f"   └── ❌ No path exists")
+        return None
+```
+
+#### Packet Processing Flow
+```python
+@set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
+def packet_in_handler(self, ev):
+    # 1. Check packet type
+    if eth.ethertype == 0x88cc:  # LLDP
+        return  # Let Ryu handle it
+    
+    # 2. Learn host location
+    self.learn_host_location(dpid, src_mac, in_port)
+    
+    # 3. Calculate path using LLDP topology
+    if dst_mac in self.host_locations:
+        path = self.calculate_shortest_path(dpid, dst_dpid)
+        
+        # 4. Install flow with OpenFlow
+        self.install_path_flow(datapath, src_mac, dst_mac, out_port)
+        
+        # 5. Forward packet
+        self.forward_packet(datapath, msg, out_port)
+```
+
+### Link Failure & Rerouting
+
+#### Detection Methods
+
+**1. OpenFlow PORT_STATUS (Immediate)**
+```python
+@set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
+def port_status_handler(self, ev):
+    if port.state == 1:  # OFPPS_LINK_DOWN
+        print(f"🔴 [PORT EVENT] Link down on s{dpid}:{port_no}")
+```
+
+**2. LLDP Timeout (Slower)**
+```python
+# No LLDP for 120s = link dead
+@set_ev_cls(event.EventLinkDelete)
+def link_delete_handler(self, ev):
+    self.topology_graph.remove_edge(src_dpid, dst_dpid)
+```
+
+#### Rerouting Example
+```
+Before failure (h1 → h2):
+Path: s1 → s2 (1 hop)
+
+After s1-s2 link fails:
+🔴 [PORT EVENT] Port 2 LINK_DOWN on s1
+📊 [TOPOLOGY] Links: 18 (was 20)
+🛤️  NEW PATH: s1 → s10 → s9 → s8 → s7 → s6 → s5 → s4 → s3 → s2 (9 hops)
+✅ Connectivity maintained!
+```
+
+### STP for Loop Prevention
+
+#### Why Needed in Ring?
+```
+Without STP: Broadcast → s1 → s2 → ... → s10 → s1 → ... (infinite loop!)
+With STP: One link blocked, creating tree structure
+```
+
+#### Two Controller Versions
+
+**main_controller.py (No STP)**
+- Simple flooding
+- Risk of broadcast storms
+- Works due to flow tables and MAC learning
+
+**main_controller_stp.py (With STP)**
+```python
+# Three protection mechanisms:
+self.blocked_ports = set()           # Block redundant links
+self.broadcast_cache = deque(1000)   # Prevent duplicates
+self.spanning_tree = nx.minimum_spanning_tree(graph)
+
+# Block packets on redundant ports
+if (dpid, in_port) in self.blocked_ports:
+    return  # Drop packet
+```
+
+#### STP in Action
 ```
 Original Ring:
 s1 -- s2 -- s3 -- s4 -- s5
 |                         |
 s10 - s9 -- s8 -- s7 -- s6
 
-After STP (s10→s1 link blocked):
+After STP (s10→s1 blocked):
 s1 -- s2 -- s3 -- s4 -- s5
                           |
 s10 - s9 -- s8 -- s7 -- s6
+     🚫 (blocked port)
 ```
 
-#### Our STP Implementation:
+---
 
-**main_controller.py** (No STP):
-- Simple flooding for broadcasts
-- Risk of broadcast storms in loops
-- Works due to MAC learning and flow timeouts
+## ⚙️ Configuration
 
-**main_controller_stp.py** (With STP):
+### Mininet Settings
 ```python
-# Three protection mechanisms:
-1. Port Blocking:
-   self.blocked_ports = set()  # Blocks redundant links
-
-2. Broadcast Cache:
-   self.broadcast_cache = deque(maxlen=1000)
-   # Prevents duplicate broadcasts
-
-3. Storm Detection:
-   if self.is_broadcast_duplicate(dpid, in_port, src_mac, dst_mac):
-       print("🛑 [STORM] Dropped duplicate broadcast")
-       return
-```
-
-#### Benefits of STP Version:
-1. **Loop Prevention**: Blocks redundant paths
-2. **Broadcast Control**: No infinite flooding
-3. **Failover Ready**: Blocked links can activate if primary fails
-4. **Network Stability**: Prevents CPU/bandwidth exhaustion
-
-### Switch and Network Configuration for Ring Topology
-
-#### 1. Mininet Switch Configuration
-```python
-# From mininet/ring_topology.py
 net = Mininet(
     controller=RemoteController,
-    switch=OVSKernelSwitch,      # Open vSwitch kernel module
-    link=TCLink,                  # Traffic Control link for bandwidth/delay
-    autoSetMacs=True              # Automatic MAC address assignment
+    switch=OVSKernelSwitch,      # Open vSwitch
+    link=TCLink,                  # Traffic control
+    autoSetMacs=True              # Auto MAC assignment
 )
 
-# Switch creation with explicit DPID
-sw = net.addSwitch(f's{i}', dpid=f'{i:016x}')  # 16-digit hex DPID
+# Port conventions:
+# Port 1: Always host connection
+# Port 2-3: Inter-switch links
 ```
 
-**Key Settings:**
-- **OVSKernelSwitch**: Uses Open vSwitch kernel datapath (faster than userspace)
-- **autoSetMacs=True**: Prevents MAC conflicts by auto-assigning sequential MACs
-- **DPID format**: 16-digit hex (e.g., s1 = 0000000000000001)
-- **No explicit OpenFlow version**: Negotiated with controller (defaults to 1.3)
-
-#### 2. Controller Configuration
+### Controller Startup
 ```bash
-# Ryu controller startup with LLDP
+# Basic version
+ryu-manager --observe-links ryu-controller/main_controller.py
+
+# STP version (recommended for ring)
 ryu-manager --observe-links ryu-controller/main_controller_stp.py
 ```
 
-**Important Flags:**
-- **--observe-links**: Enables LLDP for automatic topology discovery
-- Without this flag, the controller cannot detect links between switches
+Key flags:
+- `--observe-links`: Enables LLDP topology discovery
+- Without this, no automatic topology detection!
 
-#### 3. Port Assignment Pattern
-```python
-# Ring topology port assignments
-# Port 1: Always reserved for host connection
-net.addLink(host, switch, port1=1, port2=1)
+---
 
-# Ports 2-3: Inter-switch links
-net.addLink(s1, s2, port1=2, port2=3)  # s1:2 <-> s2:3
-net.addLink(s2, s3, port1=2, port2=3)  # s2:2 <-> s3:3
+## 📊 Testing & Monitoring
+
+### Key Log Messages
+```
+🔌 [OPENFLOW] Switch connected      # OpenFlow handshake
+🔗 [LINK UP] s1:2 ↔ s2:3           # LLDP discovery
+📦 [PACKET #1] Received             # OpenFlow PACKET_IN
+🛤️  Using DIJKSTRA PATH            # Path calculation
+📝 [FLOW #1] Installed              # OpenFlow FLOW_MOD
+🔴 [PORT EVENT] Link down           # Failure detection
 ```
 
-This consistent pattern helps the controller distinguish between host and switch ports.
+### Monitoring Commands
+```bash
+# Watch controller logs
+tmux attach -t sdn_demo
 
-### Two Controller Versions Available
+# Filter specific events
+tmux capture-pane -p | grep "DIJKSTRA"
 
-#### 1. main_controller.py (Basic Version)
-- No STP implementation
-- Simple flooding for broadcasts
-- Works in ring but has broadcast storm risk
-
-#### 2. main_controller_stp.py (Enhanced Version)
-```python
-# Broadcast storm prevention features
-self.broadcast_cache = deque(maxlen=1000)  # Recent broadcast tracking
-self.broadcast_timestamps = {}              # Timeout tracking
-self.blocked_ports = set()                  # STP blocked ports
+# In Mininet CLI
+dpctl dump-flows     # Check installed flows
+links                 # Show topology
 ```
 
-**STP Implementation:**
-- Maintains broadcast cache to detect duplicate packets
-- Blocks redundant ports to prevent loops
-- 2-second timeout for broadcast entries
+### Test Scenarios
+```bash
+# 1. Basic connectivity
+h1 ping h6
 
-### Why Ring Topology Doesn't Cause Broadcast Storm (Without STP):
+# 2. Link failure
+link s1 s2 down
+h1 ping h2  # Should work via alternate path
 
-1. **Flow Tables**: After first broadcast, flows are installed for known destinations
-2. **MAC Learning**: Controller learns host locations from first packet
-3. **Timeout**: Flows expire after 30 seconds to handle topology changes
-4. **LLDP Isolation**: LLDP packets are handled separately and not flooded
-5. **Port-based Learning**: Port 1 is always treated as host port
+# 3. Recovery
+link s1 s2 up
+h1 ping h2  # Back to optimal path
 
-### With STP Version (main_controller_stp.py):
+# 4. Broadcast storm test (STP version)
+h1 ping -b 10.0.0.255  # Should not loop
+```
 
-Additional protections:
-1. **Broadcast Cache**: Detects and drops duplicate broadcasts
-2. **Spanning Tree**: Blocks redundant links to create loop-free topology
-3. **Path Tracking**: Monitors active paths for optimization
-
-### Dijkstra Algorithm Properties:
-- **Time Complexity**: O((V + E) log V) using NetworkX implementation
-- **Optimality**: Always finds shortest path by hop count
-- **Convergence**: Immediate on topology change (next packet triggers recalculation)
-
-## 📈 Performance Characteristics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Path Calculation Time | <1ms | For 10-switch topology |
-| Rerouting Time | ~3s | Link detection + recalculation |
-| Flow Table Size | O(n²) | n = number of host pairs |
-| Packet Loss on Failure | 1-3 packets | During convergence |
+---
 
 ## 🐛 Troubleshooting
 
-### If ping doesn't work:
-1. Check controller is running: `ps aux | grep ryu`
-2. Verify topology: `links` in Mininet
-3. Check host MAC learning: Look for `[HOST] Learned` in logs
-4. Verify path calculation: Look for `DIJKSTRA PATH` in logs
+### Common Issues
 
-### If rerouting doesn't work:
-1. Confirm link is down: `link s1 s2 down` then `links`
-2. Check topology update: Look for `[TOPOLOGY] Network Status`
-3. Verify new path: Look for different `DIJKSTRA PATH` after failure
+**Ping doesn't work:**
+1. Check controller: `ps aux | grep ryu`
+2. Verify LLDP: Look for "Links discovered" in logs
+3. Check flows: `dpctl dump-flows`
+
+**No topology discovery:**
+- Did you use `--observe-links`?
+- Wait 5-10 seconds for LLDP
+- Check for "🔗 [LINK UP]" messages
+
+**Broadcast storms (ring topology):**
+- Use `main_controller_stp.py` instead
+- Check for "🌳 [STP] Spanning tree computed"
+
+**Link failure not detected:**
+- OpenFlow detects immediately
+- LLDP takes up to 120s
+- Check "🔴 [PORT EVENT]" logs
+
+### Performance Metrics
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| LLDP interval | 5s | Topology refresh rate |
+| Path calculation | <1ms | 10-switch topology |
+| Rerouting time | ~3s | Detection + recalculation |
+| Flow timeout | 30s | Adapts to changes |
+
+---
 
 ## 📝 Summary
 
-This implementation successfully demonstrates:
-1. **Dijkstra shortest-path routing** with NetworkX
-2. **Automatic rerouting** on link failures
-3. **Loop prevention** in ring topology through flow tables
-4. **Real-time topology discovery** using LLDP
-5. **Efficient packet forwarding** with flow installation
+This implementation combines:
+- **LLDP** for automatic topology discovery (the "map")
+- **OpenFlow** for switch control (the "driver")
+- **Dijkstra** for optimal path calculation
+- **STP** for loop prevention in ring topology
 
-The system handles link failures gracefully, recalculating paths within seconds and maintaining connectivity through alternative routes in the ring topology.
+Together, they create a robust SDN system with automatic failure recovery!
+
+### Key Takeaways
+1. LLDP and OpenFlow are different but work together
+2. LLDP discovers topology, OpenFlow controls switches
+3. Dijkstra uses LLDP topology for path calculation
+4. STP prevents broadcast storms in ring topology
+5. Link failures trigger automatic rerouting
+
+### Commands Reference
+```bash
+# Start
+./start_sdn_demo.sh ring
+
+# Test
+h1 ping h6
+link s1 s2 down
+pingall
+
+# Monitor
+tmux attach -t sdn_demo
+```
