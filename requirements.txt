@@ -1,3 +1,13 @@
-ryu==4.34
-networkx>=3.1
-mininet
+# SDN Lab Requirements
+# Core packages with compatible versions
+eventlet==0.30.2
+ryu
+networkx
+msgpack-python
+oslo.config
+ovs
+pbr
+Routes
+six
+tinyrpc
+WebOb

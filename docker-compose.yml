@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  sdn-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sdn-lab:latest
+    container_name: sdn-lab
+    privileged: true
+    cgroupns: host
+    stdin_open: true
+    tty: true
+    ports:
+      - "6633:6633"  # OpenFlow controller port
+      - "6653:6653"  # OpenFlow controller port (alternative)
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./:/opt/sdn-lab:rw
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+    networks:
+      - sdn-network
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TZ=Asia/Seoul
+      - container=docker
+    stop_signal: SIGRTMIN+3
+    command: /usr/sbin/init
+
+networks:
+  sdn-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
